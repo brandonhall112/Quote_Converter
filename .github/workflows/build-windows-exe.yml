@@ -24,16 +24,18 @@ jobs:
           pip install -r requirements.txt pyinstaller
 
       - name: Build executable
+        shell: cmd
         run: |
           pyinstaller --noconfirm --onefile --windowed --name QuoteConverter ^
-            --icon assets/app.ico ^
+            --icon assets\app.ico ^
             --add-data "templates;templates" ^
-            --add-data "assets/app.ico;assets" ^
+            --add-data "assets\app.ico;assets" ^
             app.py
 
       - name: Archive build output
+        shell: cmd
         run: |
-          mkdir release
+          if not exist release mkdir release
           copy dist\QuoteConverter.exe release\QuoteConverter.exe
 
       - name: Upload artifact
