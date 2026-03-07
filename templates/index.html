@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quote Conversion Follow-up Tool</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('favicon') }}">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f8fafc; color: #1f2937; }
+    .card { background: white; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 1rem; }
+    h1, h2 { margin-top: 0; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .field { display: flex; flex-direction: column; gap: .4rem; min-width: 220px; }
+    input, button { padding: .55rem; border-radius: 8px; border: 1px solid #cbd5e1; }
+    button { background: #2563eb; color: white; border: none; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    .error { color: #991b1b; background: #fee2e2; padding: .7rem; border-radius: 8px; }
+    .results-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    .results-table th, .results-table td { border: 1px solid #e2e8f0; padding: .45rem; text-align: left; }
+    .results-wrap { overflow-x: auto; }
+    .download { margin-bottom: .7rem; display: flex; gap: .6rem; }
+  </style>
+</head>
+<body>
+  <h1>Quote Conversion Follow-up Tool</h1>
+  <p>Upload an order log and quote summary, then run conversion analysis by customer + part number over your selected date range.</p>
+
+  <div class="card">
+    <h2>Run Analysis</h2>
+    <form method="post" enctype="multipart/form-data">
+      <div class="row">
+        <div class="field">
+          <label>Order Log (Excel)</label>
+          <input type="file" name="order_file" accept=".xlsx,.xls" required>
+        </div>
+        <div class="field">
+          <label>Quote Summary (Excel)</label>
+          <input type="file" name="quote_file" accept=".xlsx,.xls" required>
+        </div>
+        <div class="field">
+          <label>Start Date (optional)</label>
+          <input type="date" name="start_date">
+        </div>
+        <div class="field">
+          <label>End Date (optional)</label>
+          <input type="date" name="end_date">
+        </div>
+        <div class="field">
+          <label>Conversion Window (days)</label>
+          <input type="number" name="window_days" value="90" min="1">
+        </div>
+      </div>
+      <p><button type="submit">Run Conversion Report</button></p>
+    </form>
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+  </div>
+
+  {% if rep_results_html %}
+  <div class="card">
+    <h2>Rep Summary</h2>
+    <div class="download">
+      <a href="{{ url_for('download', report_type='rep') }}"><button>Download Rep Summary Excel</button></a>
+      <a href="{{ url_for('download', report_type='line') }}"><button>Download Line Detail Excel</button></a>
+    </div>
+    <div class="results-wrap">{{ rep_results_html | safe }}</div>
+  </div>
+  {% endif %}
+
+  {% if line_results_html %}
+  <div class="card">
+    <h2>Quote Line Detail</h2>
+    <div class="results-wrap">{{ line_results_html | safe }}</div>
+  </div>
+  {% endif %}
+</body>
+</html>
