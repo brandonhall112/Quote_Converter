@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
+from pathlib import Path
+from threading import Timer
 from typing import Optional
+import sys
+import webbrowser
 
 import pandas as pd
 from flask import Flask, render_template, request, send_file
 
-app = Flask(__name__)
+BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 
 
 @dataclass
@@ -218,8 +223,13 @@ def download(report_type: str):
 
 @app.route("/favicon.ico")
 def favicon():
-    return send_file("assets/app.ico", mimetype="image/x-icon")
+    return send_file(BASE_DIR / "assets" / "app.ico", mimetype="image/x-icon")
+
+
+def _open_browser() -> None:
+    webbrowser.open("http://127.0.0.1:8000")
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    Timer(1.0, _open_browser).start()
+    app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=False)
