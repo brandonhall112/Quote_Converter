@@ -1,15 +1,12 @@
-name: Build Windows App
+name: Launch Quote Converter Web App
 
 on:
   workflow_dispatch:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  launch-web-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
@@ -21,35 +18,61 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt
 
-      - name: Build executable
-        shell: pwsh
+      - name: Install cloudflared
         run: |
-          $args = @(
-            "--noconfirm",
-            "--onefile",
-            "--windowed",
-            "--name", "QuoteConverter",
-            "--icon", "assets/app.ico",
-            "--add-data", "templates;templates",
-            "--add-data", "assets/app.ico;assets",
-            "app.py"
-          )
-          python -m PyInstaller @args
+          curl -L --retry 3 --retry-delay 2 \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /tmp/cloudflared
+          chmod +x /tmp/cloudflared
+          sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
+          cloudflared --version
 
-      - name: Archive build output
-        shell: pwsh
+      - name: Start Flask app
         run: |
-          New-Item -ItemType Directory -Path release -Force | Out-Null
-          Copy-Item -Path dist/QuoteConverter.exe -Destination release/QuoteConverter.exe -Force
+          nohup python app.py > flask.log 2>&1 &
+          sleep 8
+          if ! pgrep -f "python app.py" >/dev/null; then
+            echo "Flask app failed to start"
+            cat flask.log
+            exit 1
+          fi
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: QuoteConverter-windows
-          path: release/QuoteConverter.exe
-          if-no-files-found: error
+      - name: Start public tunnel
+        run: |
+          nohup cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8000 > tunnel.log 2>&1 &
+          URL=""
+          for i in {1..30}; do
+            URL=$(grep -Eo "https://[-a-zA-Z0-9]+\.trycloudflare\.com" tunnel.log | head -n 1 || true)
+            if [ -n "$URL" ]; then
+              echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"
+              break
+            fi
+            sleep 2
+          done
+
+          if [ -z "$URL" ]; then
+            echo "Failed to get public URL from cloudflared"
+            cat tunnel.log
+            exit 1
+          fi
+
+      - name: Publish launch link
+        run: |
+          {
+            echo "## Quote Converter is live"
+            echo
+            echo "Open this URL to use the app: ${PUBLIC_URL}"
+            echo
+            echo "- This link is active while this workflow run is still running."
+            echo "- Cancel the workflow run to shut it down."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep app running
+        run: |
+          echo "Keeping workflow alive for manual usage."
+          echo "Cancel this workflow run when finished."
+          sleep 6h

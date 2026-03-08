@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 import re
 from threading import Timer
+import os
 from typing import Any
 import sys
 import webbrowser
@@ -127,9 +128,19 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame) -> tuple[pd.DataF
     )
     rep_summary["conversion_rate"] = (rep_summary["converted_lines"] / rep_summary["quote_lines"]).fillna(0)
 
+    def _first_non_empty(series: pd.Series) -> str:
+        for value in series:
+            if pd.notna(value) and str(value).strip() != "":
+                return str(value).strip()
+        return ""
+
     quote_output = (
-        line_output.groupby(["quote_number", "customer_id", "customer_name", "user_id", "quote_date"], dropna=False)
+        line_output.groupby(["quote_number"], dropna=False)
         .agg(
+            customer_id=("customer_id", _first_non_empty),
+            customer_name=("customer_name", _first_non_empty),
+            user_id=("user_id", _first_non_empty),
+            quote_date=("quote_date", "min"),
             parts_quoted=("part_number", "nunique"),
             matched_orders=("order_number", lambda s: ", ".join(sorted({v for v in s.dropna().astype(str) if v}))),
             converted_net_sales=("net_sales", "sum"),
@@ -174,6 +185,10 @@ def _column_map_from_header(ws, header_row: int) -> dict[str, int]:
             mapping.setdefault("quote_amount", col)
         elif "part" in label and ("count" in label or "qty" in label or "quoted" in label):
             mapping.setdefault("parts_quoted", col)
+        elif "won/lost" in label or ("won" in label and "lost" in label):
+            mapping.setdefault("follow_up_needed", col)
+        elif "actual order" in label:
+            mapping.setdefault("converted_net_sales", col)
         elif "order" in label:
             mapping.setdefault("matched_orders", col)
         elif "net" in label or "sales" in label:
@@ -303,16 +318,16 @@ def build_follow_up_workbook(template_bytes: bytes, quotes_for_followup: pd.Data
                 ws.cell(row=row_num, column=col_map["quote_amount"], value=None)
             if "parts_quoted" in col_map:
                 ws.cell(row=row_num, column=col_map["parts_quoted"], value=int(rec.get("parts_quoted") or 0))
-            if "matched_orders" in col_map:
-                ws.cell(row=row_num, column=col_map["matched_orders"], value=rec.get("matched_orders"))
             if "converted_net_sales" in col_map:
                 ws.cell(row=row_num, column=col_map["converted_net_sales"], value=float(rec.get("converted_net_sales") or 0))
             if "follow_up_needed" in col_map:
                 ws.cell(
                     row=row_num,
                     column=col_map["follow_up_needed"],
-                    value="Open" if rec.get("follow_up_needed") else "Won",
+                    value="Lost" if rec.get("follow_up_needed") else "Won",
                 )
+            if "matched_orders" in col_map:
+                ws.cell(row=row_num, column=col_map["matched_orders"], value=rec.get("matched_orders"))
             if "notes" in col_map:
                 ws.cell(row=row_num, column=col_map["notes"], value="")
             row_num += 1
@@ -407,5 +422,6 @@ def _open_browser() -> None:
 
 
 if __name__ == "__main__":
-    Timer(1.0, _open_browser).start()
+    if not os.environ.get("CI"):
+        Timer(1.0, _open_browser).start()
     app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=False)
