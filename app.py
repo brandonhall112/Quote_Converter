@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+import re
 from threading import Timer
 from typing import Any
 import sys
@@ -28,6 +29,7 @@ class ColumnMap:
     quote_line: int = 1  # B
     quote_part: int = 2  # C
     quote_customer: int = 35  # AJ
+    quote_customer_name: int = 36  # AK
     quote_date: int = 48  # AW
     quote_user: int = 61  # BJ
 
@@ -67,6 +69,7 @@ def load_quotes(file_obj: Any) -> pd.DataFrame:
             "line_number": _safe_get(raw, COLUMNS.quote_line, "Line Number (B)"),
             "part_number": _safe_get(raw, COLUMNS.quote_part, "Part Number (C)").astype(str).str.strip().str.upper(),
             "customer_id": _safe_get(raw, COLUMNS.quote_customer, "Customer ID (AJ)").astype(str).str.strip(),
+            "customer_name": _safe_get(raw, COLUMNS.quote_customer_name, "Customer Name (AK)").astype(str).str.strip(),
             "quote_date": pd.to_datetime(_safe_get(raw, COLUMNS.quote_date, "Date Quoted (AW)"), errors="coerce"),
             "user_id": _safe_get(raw, COLUMNS.quote_user, "User ID (BJ)").astype(str).str.strip(),
         }
@@ -125,7 +128,7 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame) -> tuple[pd.DataF
     rep_summary["conversion_rate"] = (rep_summary["converted_lines"] / rep_summary["quote_lines"]).fillna(0)
 
     quote_output = (
-        line_output.groupby(["quote_number", "customer_id", "user_id", "quote_date"], dropna=False)
+        line_output.groupby(["quote_number", "customer_id", "customer_name", "user_id", "quote_date"], dropna=False)
         .agg(
             parts_quoted=("part_number", "nunique"),
             matched_orders=("order_number", lambda s: ", ".join(sorted({v for v in s.dropna().astype(str) if v}))),
@@ -165,8 +168,10 @@ def _column_map_from_header(ws, header_row: int) -> dict[str, int]:
             mapping.setdefault("customer_id", col)
         elif "date" in label:
             mapping.setdefault("quote_date", col)
-        elif "rep" in label or "user" in label or "owner" in label:
+        elif "rep" in label or "user" in label or "owner" in label or "assignee" in label:
             mapping.setdefault("user_id", col)
+        elif "quote amount" in label or ("amount" in label and "order" not in label):
+            mapping.setdefault("quote_amount", col)
         elif "part" in label and ("count" in label or "qty" in label or "quoted" in label):
             mapping.setdefault("parts_quoted", col)
         elif "order" in label:
@@ -183,17 +188,62 @@ def _column_map_from_header(ws, header_row: int) -> dict[str, int]:
 def _clear_sheet_data(ws, start_row: int) -> None:
     if ws.max_row <= start_row:
         return
-    ws.delete_rows(start_row + 1, ws.max_row - start_row)
+
+    first_data_row = start_row + 1
+    last_data_row = ws.max_row
+
+    if ws._tables:
+        table = next(iter(ws._tables.values()))
+        _, last_cell = table.ref.split(":")
+        last_data_row = ws[last_cell].row
+
+    for row in range(first_data_row, last_data_row + 1):
+        for col in range(1, ws.max_column + 1):
+            cell = ws.cell(row=row, column=col)
+            if cell.data_type == "f":
+                continue
+            cell.value = None
+
+
+def _normalize_person(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (value or "").lower())
+
+
+def _display_name_from_sheet(sheet_title: str) -> str:
+    return sheet_title.split("(")[0].strip()
 
 
 def _assign_sheet_for_rep(workbook, rep: str):
     non_summary = [ws for ws in workbook.worksheets if "summary" not in ws.title.lower()]
-    rep_clean = (rep or "").strip().lower()
+
+    rep_clean = _normalize_person(rep)
+    if not rep_clean:
+        return non_summary[0] if non_summary else workbook.worksheets[0]
+
     for ws in non_summary:
-        if ws.title.strip().lower() == rep_clean:
+        if _normalize_person(ws.title) == rep_clean:
             return ws
+
     for ws in non_summary:
-        if rep_clean and rep_clean in ws.title.strip().lower():
+        ws_clean = _normalize_person(ws.title)
+        if rep_clean in ws_clean or ws_clean in rep_clean:
+            return ws
+
+    # Match user IDs like bschrader to sheet names like Brent Schrader by last name.
+    for ws in non_summary:
+        ws_parts = [p for p in re.split(r"\s+", ws.title.strip()) if p]
+        if ws_parts:
+            last_name = _normalize_person(ws_parts[-1])
+            if last_name and rep_clean.endswith(last_name):
+                return ws
+
+    # Master Allocation should be fallback only when no named tab could be identified.
+    for ws in non_summary:
+        if "master" not in ws.title.lower():
+            return ws
+
+    for ws in non_summary:
+        if rep_clean and rep_clean in _normalize_person(ws.title):
             return ws
     return non_summary[0] if non_summary else workbook.worksheets[0]
 
@@ -225,15 +275,32 @@ def build_follow_up_workbook(template_bytes: bytes, quotes_for_followup: pd.Data
             continue
 
         row_num = header_row + 1
+
+        table_last_row = ws.max_row
+        if ws._tables:
+            table = next(iter(ws._tables.values()))
+            _, last_cell = table.ref.split(":")
+            table_last_row = ws[last_cell].row
+
         for rec in rep_df.sort_values(["quote_date", "quote_number"]).to_dict("records"):
+            if row_num > table_last_row:
+                break
+
+            assignee_name = _display_name_from_sheet(ws.title)
             if "quote_number" in col_map:
                 ws.cell(row=row_num, column=col_map["quote_number"], value=rec.get("quote_number"))
             if "customer_id" in col_map:
-                ws.cell(row=row_num, column=col_map["customer_id"], value=rec.get("customer_id"))
+                ws.cell(
+                    row=row_num,
+                    column=col_map["customer_id"],
+                    value=rec.get("customer_name") or rec.get("customer_id"),
+                )
             if "quote_date" in col_map:
                 ws.cell(row=row_num, column=col_map["quote_date"], value=rec.get("quote_date"))
             if "user_id" in col_map:
-                ws.cell(row=row_num, column=col_map["user_id"], value=rec.get("user_id"))
+                ws.cell(row=row_num, column=col_map["user_id"], value=assignee_name)
+            if "quote_amount" in col_map:
+                ws.cell(row=row_num, column=col_map["quote_amount"], value=None)
             if "parts_quoted" in col_map:
                 ws.cell(row=row_num, column=col_map["parts_quoted"], value=int(rec.get("parts_quoted") or 0))
             if "matched_orders" in col_map:
@@ -244,7 +311,7 @@ def build_follow_up_workbook(template_bytes: bytes, quotes_for_followup: pd.Data
                 ws.cell(
                     row=row_num,
                     column=col_map["follow_up_needed"],
-                    value="Follow Up Needed" if rec.get("follow_up_needed") else "Converted",
+                    value="Open" if rec.get("follow_up_needed") else "Won",
                 )
             if "notes" in col_map:
                 ws.cell(row=row_num, column=col_map["notes"], value="")
