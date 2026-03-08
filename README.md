@@ -1,6 +1,6 @@
 # Quote Conversion Follow-up Tool
 
-This repository builds a click-to-launch Windows app from GitHub Actions and produces a follow-up workbook aligned to your follow-up template.
+This repository launches a live web app from GitHub Actions and produces a follow-up workbook aligned to your follow-up template.
 
 ## What changed for your workflow
 
@@ -28,10 +28,10 @@ This repository builds a click-to-launch Windows app from GitHub Actions and pro
 ## No-terminal workflow (GitHub Actions)
 
 1. In GitHub, open **Actions**.
-2. Run **Build Windows App**.
-3. Download `QuoteConverter-windows` artifact.
-4. Double-click `QuoteConverter.exe`.
-5. Browser opens to the app.
+2. Run **Launch Quote Converter Web App** (optional: set `session_minutes`, default 30).
+3. Open the workflow run and check the **Summary** panel.
+4. Click the `trycloudflare.com` URL shown there.
+5. Use the app in your browser; the run auto-closes after the configured session window.
 
 ## Troubleshooting
 
