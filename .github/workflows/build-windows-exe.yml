@@ -44,8 +44,9 @@ jobs:
       - name: Start public tunnel
         run: |
           nohup cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8000 > tunnel.log 2>&1 &
+          URL=""
           for i in {1..30}; do
-            URL=$(rg -o "https://[-a-zA-Z0-9]+\.trycloudflare\.com" tunnel.log | head -n 1 || true)
+            URL=$(grep -Eo "https://[-a-zA-Z0-9]+\.trycloudflare\.com" tunnel.log | head -n 1 || true)
             if [ -n "$URL" ]; then
               echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"
               break
@@ -53,7 +54,7 @@ jobs:
             sleep 2
           done
 
-          if [ -z "${URL:-}" ]; then
+          if [ -z "$URL" ]; then
             echo "Failed to get public URL from cloudflared"
             cat tunnel.log
             exit 1
