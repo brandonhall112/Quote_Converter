@@ -4,12 +4,13 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from threading import Timer
-from typing import Optional
+from typing import Any
 import sys
 import webbrowser
 
 import pandas as pd
 from flask import Flask, render_template, request, send_file
+from openpyxl import load_workbook
 
 BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
@@ -17,18 +18,18 @@ app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 
 @dataclass
 class ColumnMap:
-    order_number: int = 4   # E
-    order_date: int = 3     # D
-    order_customer: int = 6 # G
-    order_part: int = 14    # O
+    order_number: int = 4  # E
+    order_date: int = 3  # D
+    order_customer: int = 6  # G
+    order_part: int = 14  # O
     order_net_sales: int = 20  # U
 
-    quote_number: int = 0   # A
-    quote_line: int = 1     # B
-    quote_part: int = 2     # C
+    quote_number: int = 0  # A
+    quote_line: int = 1  # B
+    quote_part: int = 2  # C
     quote_customer: int = 35  # AJ
-    quote_date: int = 48      # AW
-    quote_user: int = 61      # BJ
+    quote_date: int = 48  # AW
+    quote_user: int = 61  # BJ
 
 
 COLUMNS = ColumnMap()
@@ -43,11 +44,11 @@ def _safe_get(df: pd.DataFrame, idx: int, name: str) -> pd.Series:
     return df.iloc[:, idx]
 
 
-def load_orders(file_obj) -> pd.DataFrame:
+def load_orders(file_obj: Any) -> pd.DataFrame:
     raw = pd.read_excel(file_obj)
     orders = pd.DataFrame(
         {
-            "order_number": _safe_get(raw, COLUMNS.order_number, "Order Number (E)"),
+            "order_number": _safe_get(raw, COLUMNS.order_number, "Order Number (E)").astype(str).str.strip(),
             "order_date": pd.to_datetime(_safe_get(raw, COLUMNS.order_date, "Order Date (D)"), errors="coerce"),
             "customer_id": _safe_get(raw, COLUMNS.order_customer, "Customer ID (G)").astype(str).str.strip(),
             "part_number": _safe_get(raw, COLUMNS.order_part, "Part Number (O)").astype(str).str.strip().str.upper(),
@@ -55,11 +56,10 @@ def load_orders(file_obj) -> pd.DataFrame:
         }
     )
     orders = orders.dropna(subset=["order_date"]).copy()
-    orders = orders[orders["part_number"].ne("")]
-    return orders
+    return orders[(orders["part_number"].ne("")) & (orders["customer_id"].ne(""))]
 
 
-def load_quotes(file_obj) -> pd.DataFrame:
+def load_quotes(file_obj: Any) -> pd.DataFrame:
     raw = pd.read_excel(file_obj)
     quotes = pd.DataFrame(
         {
@@ -72,26 +72,13 @@ def load_quotes(file_obj) -> pd.DataFrame:
         }
     )
     quotes = quotes.dropna(subset=["quote_date"]).copy()
-    quotes = quotes[quotes["part_number"].ne("")]
-    return quotes
+    return quotes[(quotes["part_number"].ne("")) & (quotes["quote_number"].ne(""))]
 
 
-def run_conversion(
-    orders: pd.DataFrame,
-    quotes: pd.DataFrame,
-    start_date: Optional[pd.Timestamp],
-    end_date: Optional[pd.Timestamp],
-    window_days: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if start_date is not None:
-        orders = orders[orders["order_date"] >= start_date]
-        quotes = quotes[quotes["quote_date"] >= start_date]
-    if end_date is not None:
-        orders = orders[orders["order_date"] <= end_date]
-        quotes = quotes[quotes["quote_date"] <= end_date]
-
+def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if quotes.empty:
-        return quotes.assign(converted=False), pd.DataFrame()
+        empty = quotes.assign(converted=False)
+        return empty, pd.DataFrame(), pd.DataFrame()
 
     merged = quotes.merge(
         orders,
@@ -101,13 +88,8 @@ def run_conversion(
     )
 
     merged["days_to_convert"] = (merged["order_date"] - merged["quote_date"]).dt.days
-    merged["valid_conversion"] = (
-        merged["days_to_convert"].notna()
-        & (merged["days_to_convert"] >= 0)
-        & (merged["days_to_convert"] <= window_days)
-    )
+    merged["valid_conversion"] = merged["days_to_convert"].notna() & (merged["days_to_convert"] >= 0)
 
-    # First conversion event per quote line
     converted_events = (
         merged[merged["valid_conversion"]]
         .sort_values("days_to_convert")
@@ -115,7 +97,7 @@ def run_conversion(
         .first()
     )
 
-    output = quotes.merge(
+    line_output = quotes.merge(
         converted_events[
             [
                 "quote_number",
@@ -129,11 +111,10 @@ def run_conversion(
         on=["quote_number", "line_number"],
         how="left",
     )
+    line_output["converted"] = line_output["order_number"].notna()
 
-    output["converted"] = output["order_number"].notna()
-
-    summary = (
-        output.groupby("user_id", dropna=False)
+    rep_summary = (
+        line_output.groupby("user_id", dropna=False)
         .agg(
             quote_lines=("quote_number", "count"),
             converted_lines=("converted", "sum"),
@@ -141,14 +122,157 @@ def run_conversion(
         )
         .reset_index()
     )
-    summary["conversion_rate"] = (summary["converted_lines"] / summary["quote_lines"]).fillna(0)
+    rep_summary["conversion_rate"] = (rep_summary["converted_lines"] / rep_summary["quote_lines"]).fillna(0)
 
-    return output, summary
+    quote_output = (
+        line_output.groupby(["quote_number", "customer_id", "user_id", "quote_date"], dropna=False)
+        .agg(
+            parts_quoted=("part_number", "nunique"),
+            matched_orders=("order_number", lambda s: ", ".join(sorted({v for v in s.dropna().astype(str) if v}))),
+            converted_net_sales=("net_sales", "sum"),
+            converted_lines=("converted", "sum"),
+            total_lines=("line_number", "count"),
+        )
+        .reset_index()
+    )
+    quote_output["converted"] = quote_output["converted_lines"] > 0
+    quote_output["follow_up_needed"] = ~quote_output["converted"]
+
+    return line_output, rep_summary, quote_output
+
+
+def _normalize_header(value: Any) -> str:
+    return str(value or "").strip().lower().replace("_", " ")
+
+
+def _find_header_row(ws) -> int:
+    for row_num in range(1, min(ws.max_row, 30) + 1):
+        labels = [_normalize_header(c.value) for c in ws[row_num] if c.value is not None]
+        if any("quote" in v for v in labels) and (any("customer" in v for v in labels) or any("date" in v for v in labels)):
+            return row_num
+    return 1
+
+
+def _column_map_from_header(ws, header_row: int) -> dict[str, int]:
+    mapping: dict[str, int] = {}
+    for col in range(1, ws.max_column + 1):
+        label = _normalize_header(ws.cell(row=header_row, column=col).value)
+        if not label:
+            continue
+        if (("quote" in label and "#" in label) or "quote number" in label or label == "quote"):
+            mapping.setdefault("quote_number", col)
+        elif "customer" in label:
+            mapping.setdefault("customer_id", col)
+        elif "date" in label:
+            mapping.setdefault("quote_date", col)
+        elif "rep" in label or "user" in label or "owner" in label:
+            mapping.setdefault("user_id", col)
+        elif "part" in label and ("count" in label or "qty" in label or "quoted" in label):
+            mapping.setdefault("parts_quoted", col)
+        elif "order" in label:
+            mapping.setdefault("matched_orders", col)
+        elif "net" in label or "sales" in label:
+            mapping.setdefault("converted_net_sales", col)
+        elif "status" in label or "follow" in label:
+            mapping.setdefault("follow_up_needed", col)
+        elif "note" in label:
+            mapping.setdefault("notes", col)
+    return mapping
+
+
+def _clear_sheet_data(ws, start_row: int) -> None:
+    if ws.max_row <= start_row:
+        return
+    ws.delete_rows(start_row + 1, ws.max_row - start_row)
+
+
+def _assign_sheet_for_rep(workbook, rep: str):
+    non_summary = [ws for ws in workbook.worksheets if "summary" not in ws.title.lower()]
+    rep_clean = (rep or "").strip().lower()
+    for ws in non_summary:
+        if ws.title.strip().lower() == rep_clean:
+            return ws
+    for ws in non_summary:
+        if rep_clean and rep_clean in ws.title.strip().lower():
+            return ws
+    return non_summary[0] if non_summary else workbook.worksheets[0]
+
+
+def build_follow_up_workbook(template_bytes: bytes, quotes_for_followup: pd.DataFrame) -> bytes:
+    wb = load_workbook(BytesIO(template_bytes))
+
+    quotes_for_followup = quotes_for_followup.copy()
+    if quotes_for_followup.empty:
+        out = BytesIO()
+        wb.save(out)
+        return out.getvalue()
+
+    target_sheets = {row.user_id: _assign_sheet_for_rep(wb, row.user_id) for row in quotes_for_followup[["user_id"]].drop_duplicates().itertuples()}
+
+    for ws in set(target_sheets.values()):
+        header_row = _find_header_row(ws)
+        _clear_sheet_data(ws, header_row)
+
+    for rep, rep_df in quotes_for_followup.groupby("user_id", dropna=False):
+        ws = target_sheets.get(rep)
+        if ws is None:
+            continue
+
+        header_row = _find_header_row(ws)
+        col_map = _column_map_from_header(ws, header_row)
+
+        if not col_map:
+            continue
+
+        row_num = header_row + 1
+        for rec in rep_df.sort_values(["quote_date", "quote_number"]).to_dict("records"):
+            if "quote_number" in col_map:
+                ws.cell(row=row_num, column=col_map["quote_number"], value=rec.get("quote_number"))
+            if "customer_id" in col_map:
+                ws.cell(row=row_num, column=col_map["customer_id"], value=rec.get("customer_id"))
+            if "quote_date" in col_map:
+                ws.cell(row=row_num, column=col_map["quote_date"], value=rec.get("quote_date"))
+            if "user_id" in col_map:
+                ws.cell(row=row_num, column=col_map["user_id"], value=rec.get("user_id"))
+            if "parts_quoted" in col_map:
+                ws.cell(row=row_num, column=col_map["parts_quoted"], value=int(rec.get("parts_quoted") or 0))
+            if "matched_orders" in col_map:
+                ws.cell(row=row_num, column=col_map["matched_orders"], value=rec.get("matched_orders"))
+            if "converted_net_sales" in col_map:
+                ws.cell(row=row_num, column=col_map["converted_net_sales"], value=float(rec.get("converted_net_sales") or 0))
+            if "follow_up_needed" in col_map:
+                ws.cell(
+                    row=row_num,
+                    column=col_map["follow_up_needed"],
+                    value="Follow Up Needed" if rec.get("follow_up_needed") else "Converted",
+                )
+            if "notes" in col_map:
+                ws.cell(row=row_num, column=col_map["notes"], value="")
+            row_num += 1
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out.getvalue()
+
+
+def _resolve_template_bytes(uploaded_template) -> bytes:
+    if uploaded_template and uploaded_template.filename:
+        return uploaded_template.read()
+
+    local_template = BASE_DIR / "assets" / "Parts Follow Up Template.xlsx"
+    if local_template.exists():
+        return local_template.read_bytes()
+
+    raise ValueError(
+        "Template file is required. Upload 'Parts Follow Up Template.xlsx' in the form, "
+        "or place it in assets/Parts Follow Up Template.xlsx."
+    )
 
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    line_results_html = None
+    quote_results_html = None
     rep_results_html = None
     error = None
 
@@ -156,67 +280,52 @@ def index():
         try:
             order_file = request.files.get("order_file")
             quote_file = request.files.get("quote_file")
-            start = request.form.get("start_date")
-            end = request.form.get("end_date")
-            window = int(request.form.get("window_days") or 90)
+            template_file = request.files.get("template_file")
 
             if not order_file or not quote_file:
                 raise ValueError("Please upload both an order log file and a quote summary file.")
 
+            template_bytes = _resolve_template_bytes(template_file)
             orders = load_orders(order_file)
             quotes = load_quotes(quote_file)
 
-            start_date = pd.to_datetime(start) if start else None
-            end_date = pd.to_datetime(end) if end else None
+            line_results, rep_summary, quote_results = run_conversion(orders, quotes)
+            follow_up_quotes = quote_results[quote_results["follow_up_needed"]].copy()
+            generated_report = build_follow_up_workbook(template_bytes, follow_up_quotes)
 
-            line_results, rep_summary = run_conversion(orders, quotes, start_date, end_date, window)
-
-            line_results_html = line_results.sort_values(["quote_date", "quote_number", "line_number"]).to_html(
-                index=False, classes="results-table"
+            quote_results_html = quote_results.sort_values(["quote_date", "quote_number"]).to_html(
+                index=False,
+                classes="results-table",
             )
             rep_results_html = rep_summary.sort_values("conversion_rate", ascending=False).to_html(
-                index=False, classes="results-table"
+                index=False,
+                classes="results-table",
             )
 
-            app.config["last_line_results"] = line_results
+            app.config["last_quote_results"] = quote_results
             app.config["last_rep_results"] = rep_summary
-        except Exception as exc:  # show user-friendly message
+            app.config["last_followup_workbook"] = generated_report
+        except Exception as exc:
             error = str(exc)
 
     return render_template(
         "index.html",
-        line_results_html=line_results_html,
+        quote_results_html=quote_results_html,
         rep_results_html=rep_results_html,
         error=error,
     )
 
 
-@app.route("/download/<report_type>")
-def download(report_type: str):
-    line_results: pd.DataFrame = app.config.get("last_line_results", pd.DataFrame())
-    rep_results: pd.DataFrame = app.config.get("last_rep_results", pd.DataFrame())
-
-    if report_type == "line":
-        df = line_results
-        filename = "quote_conversion_line_detail.xlsx"
-    elif report_type == "rep":
-        df = rep_results
-        filename = "quote_conversion_rep_summary.xlsx"
-    else:
-        return "Unknown report type", 404
-
-    if df.empty:
+@app.route("/download/followup")
+def download_followup():
+    workbook_bytes = app.config.get("last_followup_workbook")
+    if not workbook_bytes:
         return "No report available yet. Run an analysis first.", 400
 
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False)
-    buffer.seek(0)
-
     return send_file(
-        buffer,
+        BytesIO(workbook_bytes),
         as_attachment=True,
-        download_name=filename,
+        download_name="Parts_Follow_Up_Output.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 

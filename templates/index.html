@@ -6,73 +6,163 @@
   <title>Quote Conversion Follow-up Tool</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('favicon') }}">
   <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; background: #f8fafc; color: #1f2937; }
-    .card { background: white; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 1rem; }
+    :root {
+      --orange: #e54102;
+      --gray: #5f5f5f;
+      --blurple: #343551;
+      --aqua-gray: #6790a0;
+      --green-light: #90a997;
+      --dark-blue: #0c2949;
+      --light-red: #e04426;
+      --dark-gray: #4c4b4c;
+      --light-gray: #bebebe;
+      --dark-green-gray: #42725e;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: linear-gradient(180deg, #f7f7f7 0%, #eef3f7 100%);
+      color: var(--dark-blue);
+    }
+
+    .hero {
+      background: linear-gradient(135deg, var(--blurple), var(--dark-blue));
+      color: white;
+      padding: 1.5rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .hero a { color: #fff; }
+
+    .logo-block {
+      background: rgba(255,255,255,.08);
+      padding: .75rem 1rem;
+      border-radius: 10px;
+      font-size: .95rem;
+    }
+
+    .container {
+      padding: 1.5rem 2rem;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.25rem;
+      box-shadow: 0 2px 8px rgba(12,41,73,.12);
+      margin-bottom: 1rem;
+      border-left: 6px solid var(--orange);
+    }
+
     h1, h2 { margin-top: 0; }
     .row { display: flex; gap: 1rem; flex-wrap: wrap; }
-    .field { display: flex; flex-direction: column; gap: .4rem; min-width: 220px; }
-    input, button { padding: .55rem; border-radius: 8px; border: 1px solid #cbd5e1; }
-    button { background: #2563eb; color: white; border: none; cursor: pointer; }
-    button:hover { background: #1d4ed8; }
-    .error { color: #991b1b; background: #fee2e2; padding: .7rem; border-radius: 8px; }
-    .results-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-    .results-table th, .results-table td { border: 1px solid #e2e8f0; padding: .45rem; text-align: left; }
+    .field { display: flex; flex-direction: column; gap: .4rem; min-width: 260px; }
+
+    input, button {
+      padding: .55rem;
+      border-radius: 8px;
+      border: 1px solid var(--light-gray);
+    }
+
+    button {
+      background: var(--orange);
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button:hover { background: var(--light-red); }
+
+    .error {
+      color: #7f1d1d;
+      background: #fee2e2;
+      padding: .7rem;
+      border-radius: 8px;
+      border: 1px solid #fecaca;
+    }
+
+    .results-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .88rem;
+    }
+
+    .results-table th {
+      background: var(--aqua-gray);
+      color: white;
+    }
+
+    .results-table th, .results-table td {
+      border: 1px solid #d3d7de;
+      padding: .45rem;
+      text-align: left;
+    }
+
     .results-wrap { overflow-x: auto; }
     .download { margin-bottom: .7rem; display: flex; gap: .6rem; }
+    .note { color: var(--dark-gray); }
   </style>
 </head>
 <body>
-  <h1>Quote Conversion Follow-up Tool</h1>
-  <p>Upload an order log and quote summary, then run conversion analysis by customer + part number over your selected date range.</p>
+  <div class="hero">
+    <div>
+      <h1>Quote Conversion Follow-up Tool</h1>
+      <p>Upload your files and get a follow-up workbook organized by quote owner and quote number.</p>
+    </div>
+    <div class="logo-block">
+      Pearson themed view · optional site media:<br>
+      <a href="https://pearsonpkg.com/" target="_blank" rel="noreferrer">pearsonpkg.com</a>
+    </div>
+  </div>
 
-  <div class="card">
-    <h2>Run Analysis</h2>
-    <form method="post" enctype="multipart/form-data">
-      <div class="row">
-        <div class="field">
-          <label>Order Log (Excel)</label>
-          <input type="file" name="order_file" accept=".xlsx,.xls" required>
+  <div class="container">
+    <div class="card">
+      <h2>Run Analysis</h2>
+      <p class="note">No date picker or conversion window is required. The uploaded file range controls the analysis period.</p>
+      <form method="post" enctype="multipart/form-data">
+        <div class="row">
+          <div class="field">
+            <label>Order Log (Excel)</label>
+            <input type="file" name="order_file" accept=".xlsx,.xls" required>
+          </div>
+          <div class="field">
+            <label>Quote Summary (Excel)</label>
+            <input type="file" name="quote_file" accept=".xlsx,.xls" required>
+          </div>
+          <div class="field">
+            <label>Parts Follow Up Template (Excel)</label>
+            <input type="file" name="template_file" accept=".xlsx,.xlsm,.xls">
+          </div>
         </div>
-        <div class="field">
-          <label>Quote Summary (Excel)</label>
-          <input type="file" name="quote_file" accept=".xlsx,.xls" required>
-        </div>
-        <div class="field">
-          <label>Start Date (optional)</label>
-          <input type="date" name="start_date">
-        </div>
-        <div class="field">
-          <label>End Date (optional)</label>
-          <input type="date" name="end_date">
-        </div>
-        <div class="field">
-          <label>Conversion Window (days)</label>
-          <input type="number" name="window_days" value="90" min="1">
-        </div>
-      </div>
-      <p><button type="submit">Run Conversion Report</button></p>
-    </form>
-    {% if error %}
+        <p><button type="submit">Build Follow-up Workbook</button></p>
+      </form>
+      {% if error %}
       <div class="error">{{ error }}</div>
+      {% endif %}
+    </div>
+
+    {% if rep_results_html %}
+    <div class="card">
+      <h2>Rep Summary</h2>
+      <div class="download">
+        <a href="{{ url_for('download_followup') }}"><button>Download Parts Follow Up Output</button></a>
+      </div>
+      <div class="results-wrap">{{ rep_results_html | safe }}</div>
+    </div>
+    {% endif %}
+
+    {% if quote_results_html %}
+    <div class="card">
+      <h2>Quote-Level Consolidated View</h2>
+      <div class="results-wrap">{{ quote_results_html | safe }}</div>
+    </div>
     {% endif %}
   </div>
-
-  {% if rep_results_html %}
-  <div class="card">
-    <h2>Rep Summary</h2>
-    <div class="download">
-      <a href="{{ url_for('download', report_type='rep') }}"><button>Download Rep Summary Excel</button></a>
-      <a href="{{ url_for('download', report_type='line') }}"><button>Download Line Detail Excel</button></a>
-    </div>
-    <div class="results-wrap">{{ rep_results_html | safe }}</div>
-  </div>
-  {% endif %}
-
-  {% if line_results_html %}
-  <div class="card">
-    <h2>Quote Line Detail</h2>
-    <div class="results-wrap">{{ line_results_html | safe }}</div>
-  </div>
-  {% endif %}
 </body>
 </html>

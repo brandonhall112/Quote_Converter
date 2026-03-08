@@ -1,35 +1,38 @@
 # Quote Conversion Follow-up Tool
 
-This repository is set up so you can build a **click-to-launch Windows app** from **GitHub Actions** without running terminal commands locally.
+This repository builds a click-to-launch Windows app from GitHub Actions and produces a follow-up workbook aligned to your follow-up template.
 
-## What the app does
+## What changed for your workflow
 
-- Uploads:
-  - **Order Log** Excel file (uses columns D, E, G, O, U)
-  - **Quote Summary** Excel file (uses columns A, B, C, AJ, AW, BJ)
-- Matches quote lines to order lines by:
-  - `customer_id`
-  - `part_number`
-  - order date on/after quote date and within a conversion window (default 90 days)
-- Outputs:
-  - Quote line detail with conversion flag and linked order
-  - Rep summary with conversion rate and converted net sales
-  - Downloadable Excel reports
+- No date range selectors in the UI.
+- No conversion window selector in the UI.
+- Analysis period is driven strictly by the uploaded files.
+- Output is consolidated at the **quote number** level (not line-by-line follow-up output).
+- Output workbook is generated from your **Parts Follow Up Template.xlsx** so formulas/summary logic are preserved.
+
+## Inputs
+
+- Order Log Excel (uses columns D, E, G, O, U)
+- Quote Summary Excel (uses columns A, B, C, AJ, AW, BJ)
+- Parts Follow Up Template Excel
+  - If not uploaded in the form, the app will look for:
+  - `assets/Parts Follow Up Template.xlsx`
+
+## Output
+
+- Download: `Parts_Follow_Up_Output.xlsx`
+- Uses your template workbook as a base.
+- Populates follow-up quote rows by rep/owner tab where possible.
+- Keeps formula cells and summary tabs from the original template.
 
 ## No-terminal workflow (GitHub Actions)
 
-1. In GitHub, go to **Actions**.
-2. Click **Build Windows App**.
-3. Click **Run workflow**.
-4. Wait for the run to finish.
-5. Open the finished run and download artifact **QuoteConverter-windows**.
-6. Double-click `QuoteConverter.exe`.
-7. Your browser opens automatically to the app.
+1. In GitHub, open **Actions**.
+2. Run **Build Windows App**.
+3. Download `QuoteConverter-windows` artifact.
+4. Double-click `QuoteConverter.exe`.
+5. Browser opens to the app.
 
-## App icon
+## Troubleshooting
 
-- Uses `assets/app.ico` as the application icon and favicon.
-
-## Future enhancement
-
-- Add quote-line net price once it is available in the quote summary source data.
+If Codex says it cannot update an externally changed PR, create a **new PR** from latest `main`.
