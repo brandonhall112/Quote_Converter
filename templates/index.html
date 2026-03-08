@@ -107,6 +107,8 @@
     .results-wrap { overflow-x: auto; }
     .download { margin-bottom: .7rem; display: flex; gap: .6rem; }
     .note { color: var(--dark-gray); }
+    .filter-note { margin-top: .2rem; color: var(--gray); font-size: .85rem; }
+    .filter-input { width: 100%; box-sizing: border-box; padding: .35rem; border-radius: 6px; border: 1px solid var(--light-gray); font-size: .8rem; }
   </style>
 </head>
 <body>
@@ -164,9 +166,46 @@
     {% if quote_results_html %}
     <div class="card">
       <h2>Quote-Level Consolidated View</h2>
+      <p class="filter-note">Use the filter boxes under each column header to narrow results.</p>
       <div class="results-wrap">{{ quote_results_html | safe }}</div>
     </div>
     {% endif %}
   </div>
+
+  <script>
+    (function () {
+      const table = document.getElementById('quote-results-table');
+      if (!table || !table.tHead || table.tHead.rows.length === 0) return;
+
+      const headerRow = table.tHead.rows[0];
+      const filterRow = document.createElement('tr');
+      const tbodyRows = Array.from(table.tBodies[0]?.rows || []);
+
+      Array.from(headerRow.cells).forEach((th, index) => {
+        const filterTh = document.createElement('th');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'filter-input';
+        input.placeholder = `Filter ${th.textContent.trim()}`;
+
+        input.addEventListener('input', () => {
+          const activeFilters = Array.from(filterRow.querySelectorAll('input')).map(i => i.value.trim().toLowerCase());
+          tbodyRows.forEach((row) => {
+            const matches = activeFilters.every((filterText, colIndex) => {
+              if (!filterText) return true;
+              const cellText = (row.cells[colIndex]?.textContent || '').toLowerCase();
+              return cellText.includes(filterText);
+            });
+            row.style.display = matches ? '' : 'none';
+          });
+        });
+
+        filterTh.appendChild(input);
+        filterRow.appendChild(filterTh);
+      });
+
+      table.tHead.appendChild(filterRow);
+    })();
+  </script>
 </body>
 </html>

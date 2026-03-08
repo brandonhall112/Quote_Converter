@@ -117,16 +117,11 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame) -> tuple[pd.DataF
     )
     line_output["converted"] = line_output["order_number"].notna()
 
-    rep_summary = (
-        line_output.groupby("user_id", dropna=False)
-        .agg(
-            quote_lines=("quote_number", "count"),
-            converted_lines=("converted", "sum"),
-            converted_net_sales=("net_sales", "sum"),
-        )
-        .reset_index()
-    )
-    rep_summary["conversion_rate"] = (rep_summary["converted_lines"] / rep_summary["quote_lines"]).fillna(0)
+    def _first_non_empty(series: pd.Series) -> str:
+        for value in series:
+            if pd.notna(value) and str(value).strip() != "":
+                return str(value).strip()
+        return ""
 
     def _first_non_empty(series: pd.Series) -> str:
         for value in series:
@@ -151,6 +146,17 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame) -> tuple[pd.DataF
     )
     quote_output["converted"] = quote_output["converted_lines"] > 0
     quote_output["follow_up_needed"] = ~quote_output["converted"]
+
+    rep_summary = (
+        quote_output.groupby("user_id", dropna=False)
+        .agg(
+            consolidated_quotes=("quote_number", "count"),
+            converted_quotes=("converted", "sum"),
+            converted_net_sales=("converted_net_sales", "sum"),
+        )
+        .reset_index()
+    )
+    rep_summary["conversion_rate"] = (rep_summary["converted_quotes"] / rep_summary["consolidated_quotes"]).fillna(0)
 
     return line_output, rep_summary, quote_output
 
@@ -352,6 +358,19 @@ def _resolve_template_bytes(uploaded_template) -> bytes:
     )
 
 
+
+def _format_currency(value: Any) -> str:
+    if pd.isna(value):
+        return ""
+    return f"${float(value):,.2f}"
+
+
+def _format_percent(value: Any) -> str:
+    if pd.isna(value):
+        return ""
+    return f"{float(value) * 100:.2f}%"
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     quote_results_html = None
@@ -375,13 +394,21 @@ def index():
             follow_up_quotes = quote_results[quote_results["follow_up_needed"]].copy()
             generated_report = build_follow_up_workbook(template_bytes, follow_up_quotes)
 
-            quote_results_html = quote_results.sort_values(["quote_date", "quote_number"]).to_html(
+            quote_results_display = quote_results.sort_values(["quote_date", "quote_number"]).copy()
+            quote_results_display["converted_net_sales"] = quote_results_display["converted_net_sales"].map(_format_currency)
+            quote_results_html = quote_results_display.to_html(
                 index=False,
-                classes="results-table",
+                classes="results-table filterable-table",
+                table_id="quote-results-table",
             )
-            rep_results_html = rep_summary.sort_values("conversion_rate", ascending=False).to_html(
+
+            rep_results_display = rep_summary.sort_values("conversion_rate", ascending=False).copy()
+            rep_results_display["converted_net_sales"] = rep_results_display["converted_net_sales"].map(_format_currency)
+            rep_results_display["conversion_rate"] = rep_results_display["conversion_rate"].map(_format_percent)
+            rep_results_html = rep_results_display.to_html(
                 index=False,
                 classes="results-table",
+                table_id="rep-summary-table",
             )
 
             app.config["last_quote_results"] = quote_results
