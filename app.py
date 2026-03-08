@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 import re
 from threading import Timer
+import os
 from typing import Any
 import sys
 import webbrowser
@@ -421,5 +422,6 @@ def _open_browser() -> None:
 
 
 if __name__ == "__main__":
-    Timer(1.0, _open_browser).start()
+    if not os.environ.get("CI"):
+        Timer(1.0, _open_browser).start()
     app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=False)
