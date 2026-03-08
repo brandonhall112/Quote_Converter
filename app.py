@@ -175,7 +175,7 @@ def _column_map_from_header(ws, header_row: int) -> dict[str, int]:
             continue
         if (("quote" in label and "#" in label) or "quote number" in label or label == "quote"):
             mapping.setdefault("quote_number", col)
-        elif "customer" in label:
+        elif "customer" in label or "cust" in label:
             mapping.setdefault("customer_id", col)
         elif "date" in label:
             mapping.setdefault("quote_date", col)
@@ -324,7 +324,7 @@ def build_follow_up_workbook(template_bytes: bytes, quotes_for_followup: pd.Data
                 ws.cell(
                     row=row_num,
                     column=col_map["follow_up_needed"],
-                    value="Lost" if rec.get("follow_up_needed") else "Won",
+                    value="",
                 )
             if "matched_orders" in col_map:
                 ws.cell(row=row_num, column=col_map["matched_orders"], value=rec.get("matched_orders"))
