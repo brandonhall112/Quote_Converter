@@ -174,37 +174,56 @@
 
   <script>
     (function () {
-      const table = document.getElementById('quote-results-table');
-      if (!table || !table.tHead || table.tHead.rows.length === 0) return;
+      const toNumber = (value) => {
+        const cleaned = value.replace(/[$,%\s,]/g, '');
+        const n = Number(cleaned);
+        return Number.isFinite(n) ? n : null;
+      };
 
-      const headerRow = table.tHead.rows[0];
-      const filterRow = document.createElement('tr');
-      const tbodyRows = Array.from(table.tBodies[0]?.rows || []);
+      const makeSortable = (tableId) => {
+        const table = document.getElementById(tableId);
+        if (!table || !table.tHead || table.tHead.rows.length === 0 || !table.tBodies.length) return;
 
-      Array.from(headerRow.cells).forEach((th, index) => {
-        const filterTh = document.createElement('th');
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'filter-input';
-        input.placeholder = `Filter ${th.textContent.trim()}`;
+        const headerCells = Array.from(table.tHead.rows[0].cells);
+        const tbody = table.tBodies[0];
 
-        input.addEventListener('input', () => {
-          const activeFilters = Array.from(filterRow.querySelectorAll('input')).map(i => i.value.trim().toLowerCase());
-          tbodyRows.forEach((row) => {
-            const matches = activeFilters.every((filterText, colIndex) => {
-              if (!filterText) return true;
-              const cellText = (row.cells[colIndex]?.textContent || '').toLowerCase();
-              return cellText.includes(filterText);
+        headerCells.forEach((th, index) => {
+          th.style.cursor = 'pointer';
+          th.title = 'Click to sort ascending/descending';
+          th.dataset.sortDir = 'none';
+
+          th.addEventListener('click', () => {
+            const currentDir = th.dataset.sortDir === 'asc' ? 'desc' : 'asc';
+            headerCells.forEach((cell) => {
+              cell.dataset.sortDir = 'none';
+              cell.textContent = cell.textContent.replace(/\s*[▲▼]$/, '');
             });
-            row.style.display = matches ? '' : 'none';
+            th.dataset.sortDir = currentDir;
+            th.textContent = `${th.textContent.replace(/\s*[▲▼]$/, '')} ${currentDir === 'asc' ? '▲' : '▼'}`;
+
+            const rows = Array.from(tbody.rows);
+            rows.sort((a, b) => {
+              const aText = (a.cells[index]?.textContent || '').trim();
+              const bText = (b.cells[index]?.textContent || '').trim();
+              const aNum = toNumber(aText);
+              const bNum = toNumber(bText);
+
+              let cmp = 0;
+              if (aNum !== null && bNum !== null) {
+                cmp = aNum - bNum;
+              } else {
+                cmp = aText.localeCompare(bText, undefined, { numeric: true, sensitivity: 'base' });
+              }
+              return currentDir === 'asc' ? cmp : -cmp;
+            });
+
+            rows.forEach((row) => tbody.appendChild(row));
           });
         });
+      };
 
-        filterTh.appendChild(input);
-        filterRow.appendChild(filterTh);
-      });
-
-      table.tHead.appendChild(filterRow);
+      makeSortable('quote-results-table');
+      makeSortable('rep-summary-table');
     })();
   </script>
 </body>

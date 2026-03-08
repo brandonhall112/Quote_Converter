@@ -123,12 +123,6 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame) -> tuple[pd.DataF
                 return str(value).strip()
         return ""
 
-    def _first_non_empty(series: pd.Series) -> str:
-        for value in series:
-            if pd.notna(value) and str(value).strip() != "":
-                return str(value).strip()
-        return ""
-
     quote_output = (
         line_output.groupby(["quote_number"], dropna=False)
         .agg(
@@ -398,16 +392,25 @@ def index():
             quote_results_display["converted_net_sales"] = quote_results_display["converted_net_sales"].map(_format_currency)
             quote_results_html = quote_results_display.to_html(
                 index=False,
-                classes="results-table filterable-table",
+                classes="results-table sortable-table",
                 table_id="quote-results-table",
             )
 
             rep_results_display = rep_summary.sort_values("conversion_rate", ascending=False).copy()
             rep_results_display["converted_net_sales"] = rep_results_display["converted_net_sales"].map(_format_currency)
             rep_results_display["conversion_rate"] = rep_results_display["conversion_rate"].map(_format_percent)
+            rep_results_display = rep_results_display.rename(
+                columns={
+                    "user_id": "Parts Rep",
+                    "consolidated_quotes": "Number of Quotes",
+                    "converted_quotes": "Number of Converted Quotes",
+                    "converted_net_sales": "Converted Net Sales",
+                    "conversion_rate": "Conversion Rate",
+                }
+            )
             rep_results_html = rep_results_display.to_html(
                 index=False,
-                classes="results-table",
+                classes="results-table sortable-table",
                 table_id="rep-summary-table",
             )
 
