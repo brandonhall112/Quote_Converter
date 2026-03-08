@@ -28,10 +28,10 @@ This repository launches a live web app from GitHub Actions and produces a follo
 ## No-terminal workflow (GitHub Actions)
 
 1. In GitHub, open **Actions**.
-2. Run **Launch Quote Converter Web App**.
+2. Run **Launch Quote Converter Web App** (optional: set `session_minutes`, default 30).
 3. Open the workflow run and check the **Summary** panel.
 4. Click the `trycloudflare.com` URL shown there.
-5. Use the app in your browser while the workflow run is active.
+5. Use the app in your browser; the run auto-closes after the configured session window.
 
 ## Troubleshooting
 

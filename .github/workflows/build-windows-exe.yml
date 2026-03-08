@@ -2,11 +2,16 @@ name: Launch Quote Converter Web App
 
 on:
   workflow_dispatch:
+    inputs:
+      session_minutes:
+        description: "How long to keep the web app available (5-120 minutes)"
+        required: false
+        default: "30"
 
 jobs:
   launch-web-app:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 130
 
     steps:
       - name: Checkout
@@ -60,6 +65,20 @@ jobs:
             exit 1
           fi
 
+      - name: Normalize session duration
+        run: |
+          SESSION="${{ github.event.inputs.session_minutes }}"
+          if ! [[ "$SESSION" =~ ^[0-9]+$ ]]; then
+            SESSION=30
+          fi
+          if [ "$SESSION" -lt 5 ]; then
+            SESSION=5
+          fi
+          if [ "$SESSION" -gt 120 ]; then
+            SESSION=120
+          fi
+          echo "SESSION_MINUTES=$SESSION" >> "$GITHUB_ENV"
+
       - name: Publish launch link
         run: |
           {
@@ -67,12 +86,11 @@ jobs:
             echo
             echo "Open this URL to use the app: ${PUBLIC_URL}"
             echo
-            echo "- This link is active while this workflow run is still running."
-            echo "- Cancel the workflow run to shut it down."
+            echo "- The app session is configured to auto-close after ${SESSION_MINUTES} minutes."
+            echo "- When the workflow ends, this temporary URL will stop working."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Keep app running
+      - name: Keep app alive for configured session window
         run: |
-          echo "Keeping workflow alive for manual usage."
-          echo "Cancel this workflow run when finished."
-          sleep 6h
+          echo "Keeping app available for ${SESSION_MINUTES} minutes..."
+          sleep "$((SESSION_MINUTES * 60))"
