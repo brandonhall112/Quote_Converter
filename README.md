@@ -54,11 +54,23 @@ Render gives you a URL like:
 
 That link is your always-online app (as long as the Render service is running).
 
+### 6) Important: force Python 3.11 on Render (fixes your pandas build error)
+In your Render service:
+- Open **Settings**
+- Find **Environment**
+- Add this variable:
+  - Key: `PYTHON_VERSION`
+  - Value: `3.11.9`
+- Save changes and click **Manual Deploy** -> **Deploy latest commit**
+
+Why: your failed build log shows Render tried Python 3.14, and pandas currently does not have a compatible wheel path there for your stack.
+
 ---
 
 ## Notes
 
 - `gunicorn` is included in `requirements.txt` for Render.
+- `runtime.txt` pins Python to `3.11.9` for hosts that honor runtime files.
 - `app.py` is set to use Render's `PORT` automatically.
 - Local run still works with:
   ```bash
