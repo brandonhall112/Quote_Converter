@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 import re
 from threading import Timer
+import os
 from typing import Any
 import sys
 import webbrowser
@@ -116,20 +117,19 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame) -> tuple[pd.DataF
     )
     line_output["converted"] = line_output["order_number"].notna()
 
-    rep_summary = (
-        line_output.groupby("user_id", dropna=False)
-        .agg(
-            quote_lines=("quote_number", "count"),
-            converted_lines=("converted", "sum"),
-            converted_net_sales=("net_sales", "sum"),
-        )
-        .reset_index()
-    )
-    rep_summary["conversion_rate"] = (rep_summary["converted_lines"] / rep_summary["quote_lines"]).fillna(0)
+    def _first_non_empty(series: pd.Series) -> str:
+        for value in series:
+            if pd.notna(value) and str(value).strip() != "":
+                return str(value).strip()
+        return ""
 
     quote_output = (
-        line_output.groupby(["quote_number", "customer_id", "customer_name", "user_id", "quote_date"], dropna=False)
+        line_output.groupby(["quote_number"], dropna=False)
         .agg(
+            customer_id=("customer_id", _first_non_empty),
+            customer_name=("customer_name", _first_non_empty),
+            user_id=("user_id", _first_non_empty),
+            quote_date=("quote_date", "min"),
             parts_quoted=("part_number", "nunique"),
             matched_orders=("order_number", lambda s: ", ".join(sorted({v for v in s.dropna().astype(str) if v}))),
             converted_net_sales=("net_sales", "sum"),
@@ -140,6 +140,17 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame) -> tuple[pd.DataF
     )
     quote_output["converted"] = quote_output["converted_lines"] > 0
     quote_output["follow_up_needed"] = ~quote_output["converted"]
+
+    rep_summary = (
+        quote_output.groupby("user_id", dropna=False)
+        .agg(
+            consolidated_quotes=("quote_number", "count"),
+            converted_quotes=("converted", "sum"),
+            converted_net_sales=("converted_net_sales", "sum"),
+        )
+        .reset_index()
+    )
+    rep_summary["conversion_rate"] = (rep_summary["converted_quotes"] / rep_summary["consolidated_quotes"]).fillna(0)
 
     return line_output, rep_summary, quote_output
 
@@ -164,7 +175,7 @@ def _column_map_from_header(ws, header_row: int) -> dict[str, int]:
             continue
         if (("quote" in label and "#" in label) or "quote number" in label or label == "quote"):
             mapping.setdefault("quote_number", col)
-        elif "customer" in label:
+        elif "customer" in label or "cust" in label:
             mapping.setdefault("customer_id", col)
         elif "date" in label:
             mapping.setdefault("quote_date", col)
@@ -174,6 +185,10 @@ def _column_map_from_header(ws, header_row: int) -> dict[str, int]:
             mapping.setdefault("quote_amount", col)
         elif "part" in label and ("count" in label or "qty" in label or "quoted" in label):
             mapping.setdefault("parts_quoted", col)
+        elif "won/lost" in label or ("won" in label and "lost" in label):
+            mapping.setdefault("follow_up_needed", col)
+        elif "actual order" in label:
+            mapping.setdefault("converted_net_sales", col)
         elif "order" in label:
             mapping.setdefault("matched_orders", col)
         elif "net" in label or "sales" in label:
@@ -303,16 +318,16 @@ def build_follow_up_workbook(template_bytes: bytes, quotes_for_followup: pd.Data
                 ws.cell(row=row_num, column=col_map["quote_amount"], value=None)
             if "parts_quoted" in col_map:
                 ws.cell(row=row_num, column=col_map["parts_quoted"], value=int(rec.get("parts_quoted") or 0))
-            if "matched_orders" in col_map:
-                ws.cell(row=row_num, column=col_map["matched_orders"], value=rec.get("matched_orders"))
             if "converted_net_sales" in col_map:
                 ws.cell(row=row_num, column=col_map["converted_net_sales"], value=float(rec.get("converted_net_sales") or 0))
             if "follow_up_needed" in col_map:
                 ws.cell(
                     row=row_num,
                     column=col_map["follow_up_needed"],
-                    value="Open" if rec.get("follow_up_needed") else "Won",
+                    value="",
                 )
+            if "matched_orders" in col_map:
+                ws.cell(row=row_num, column=col_map["matched_orders"], value=rec.get("matched_orders"))
             if "notes" in col_map:
                 ws.cell(row=row_num, column=col_map["notes"], value="")
             row_num += 1
@@ -335,6 +350,19 @@ def _resolve_template_bytes(uploaded_template) -> bytes:
         "Template file is required. Upload 'Parts Follow Up Template.xlsx' in the form, "
         "or place it in assets/Parts Follow Up Template.xlsx."
     )
+
+
+
+def _format_currency(value: Any) -> str:
+    if pd.isna(value):
+        return ""
+    return f"${float(value):,.2f}"
+
+
+def _format_percent(value: Any) -> str:
+    if pd.isna(value):
+        return ""
+    return f"{float(value) * 100:.2f}%"
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -360,13 +388,30 @@ def index():
             follow_up_quotes = quote_results[quote_results["follow_up_needed"]].copy()
             generated_report = build_follow_up_workbook(template_bytes, follow_up_quotes)
 
-            quote_results_html = quote_results.sort_values(["quote_date", "quote_number"]).to_html(
+            quote_results_display = quote_results.sort_values(["quote_date", "quote_number"]).copy()
+            quote_results_display["converted_net_sales"] = quote_results_display["converted_net_sales"].map(_format_currency)
+            quote_results_html = quote_results_display.to_html(
                 index=False,
-                classes="results-table",
+                classes="results-table sortable-table",
+                table_id="quote-results-table",
             )
-            rep_results_html = rep_summary.sort_values("conversion_rate", ascending=False).to_html(
+
+            rep_results_display = rep_summary.sort_values("conversion_rate", ascending=False).copy()
+            rep_results_display["converted_net_sales"] = rep_results_display["converted_net_sales"].map(_format_currency)
+            rep_results_display["conversion_rate"] = rep_results_display["conversion_rate"].map(_format_percent)
+            rep_results_display = rep_results_display.rename(
+                columns={
+                    "user_id": "Parts Rep",
+                    "consolidated_quotes": "Number of Quotes",
+                    "converted_quotes": "Number of Converted Quotes",
+                    "converted_net_sales": "Converted Net Sales",
+                    "conversion_rate": "Conversion Rate",
+                }
+            )
+            rep_results_html = rep_results_display.to_html(
                 index=False,
-                classes="results-table",
+                classes="results-table sortable-table",
+                table_id="rep-summary-table",
             )
 
             app.config["last_quote_results"] = quote_results
@@ -407,5 +452,8 @@ def _open_browser() -> None:
 
 
 if __name__ == "__main__":
-    Timer(1.0, _open_browser).start()
-    app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=False)
+    port = int(os.environ.get("PORT", "8000"))
+    is_local_dev = not os.environ.get("CI") and not os.environ.get("PORT")
+    if is_local_dev:
+        Timer(1.0, _open_browser).start()
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
