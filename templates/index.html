@@ -107,6 +107,8 @@
     .results-wrap { overflow-x: auto; }
     .download { margin-bottom: .7rem; display: flex; gap: .6rem; }
     .note { color: var(--dark-gray); }
+    .filter-note { margin-top: .2rem; color: var(--gray); font-size: .85rem; }
+    .filter-input { width: 100%; box-sizing: border-box; padding: .35rem; border-radius: 6px; border: 1px solid var(--light-gray); font-size: .8rem; }
   </style>
 </head>
 <body>
@@ -172,6 +174,7 @@
     {% if quote_results_html %}
     <div class="card">
       <h2>Quote-Level Consolidated View</h2>
+      <p class="filter-note">Use the filter boxes under each column header to narrow results.</p>
       <div class="results-wrap">{{ quote_results_html | safe }}</div>
     </div>
     {% endif %}
