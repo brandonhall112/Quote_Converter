@@ -236,6 +236,17 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame, min_line_match_ra
     )
     rep_summary["conversion_rate"] = (rep_summary["converted_quotes"] / rep_summary["consolidated_quotes"]).fillna(0)
 
+    rep_summary = (
+        quote_output.groupby("user_id", dropna=False)
+        .agg(
+            consolidated_quotes=("quote_number", "count"),
+            converted_quotes=("converted", "sum"),
+            converted_net_sales=("converted_net_sales", "sum"),
+        )
+        .reset_index()
+    )
+    rep_summary["conversion_rate"] = (rep_summary["converted_quotes"] / rep_summary["consolidated_quotes"]).fillna(0)
+
     return line_output, rep_summary, quote_output
 
 
