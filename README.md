@@ -32,7 +32,7 @@ Make sure your latest code is on `main`.
 - Click **New +**
 - Click **Blueprint**
 - Choose this GitHub repo
-- Render will read `render.yaml` and auto-fill settings, including Python 3.11.9
+- Render will read `render.yaml` and auto-fill settings
 
 If you do not use Blueprint, create a normal Web Service and copy the same settings manually.
 
@@ -56,7 +56,7 @@ Render gives you a URL like:
 
 That link is your always-online app (as long as the Render service is running).
 
-### 6) If Render still shows Python 3.14, force-sync the version
+### 6) If Render still shows Python 3.14, force-sync and clear cache
 In your Render service:
 - Open **Settings**
 - Set **Python Version** to `3.11.9` (if visible)
@@ -73,8 +73,9 @@ Why: your error log shows Render building with Python 3.14.3, which causes panda
 ## Notes
 
 - `gunicorn` is included in `requirements.txt` for Render.
+- `.python-version` pins Python to `3.11.9` (Render checks this).
 - `runtime.txt` pins Python to `3.11.9` for hosts that honor runtime files.
-- `render.yaml` also pins Python to `3.11.9` so Blueprint deploys use the right version automatically.
+- `render.yaml` sets `PYTHON_VERSION=3.11.9` for Blueprint deploys.
 - `app.py` is set to use Render's `PORT` automatically.
 - Local run still works with:
   ```bash
