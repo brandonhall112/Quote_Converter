@@ -130,7 +130,7 @@
   <div class="container">
     <div class="card">
       <h2>Run Analysis</h2>
-      <p class="note">No date picker or conversion window is required. The uploaded file range controls the analysis period.</p>
+      <p class="note">No date picker or conversion window is required. The uploaded file range controls the analysis period. A quote is now only marked converted when at least 90% of its lines match.</p>
       <form method="post" enctype="multipart/form-data">
         <div class="row">
           <div class="field">
@@ -140,6 +140,14 @@
           <div class="field">
             <label>Quote Summary (Excel)</label>
             <input type="file" name="quote_file" accept=".xlsx,.xls" required>
+          </div>
+          <div class="field">
+            <label>Quote Totals Summary (optional, Excel)</label>
+            <input type="file" name="quote_totals_file" accept=".xlsx,.xls">
+          </div>
+          <div class="field">
+            <label>Minimum Quote Amount for Follow-up ($)</label>
+            <input type="number" name="min_quote_amount" value="2000" min="0" step="100">
           </div>
           <div class="field">
             <label>Parts Follow Up Template (Excel)</label>

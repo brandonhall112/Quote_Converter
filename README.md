@@ -13,13 +13,16 @@ This app takes your Order Log + Quote Summary and creates a follow-up workbook u
 ## Inputs
 
 - Order Log Excel (columns D, E, G, O, U)
-- Quote Summary Excel (columns A, B, C, AJ, AW, BJ)
+- Quote Line Summary Excel (columns A, B, C, AJ, AW, BJ)
+- Quote Totals Summary Excel (optional; columns A, D, I, J, M)
 - Parts Follow Up Template Excel
   - If not uploaded in the form, app uses `assets/Parts Follow Up Template.xlsx`
 
 ## Output
 
 - Download file: `Parts_Follow_Up_Output.xlsx`
+- Minimum follow-up floor defaults to `$2,000` (configurable in UI).
+- A quote is only considered converted when at least `90%` of its lines match to orders.
 
 ---
 

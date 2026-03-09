@@ -79,7 +79,23 @@ def load_quotes(file_obj: Any) -> pd.DataFrame:
     return quotes[(quotes["part_number"].ne("")) & (quotes["quote_number"].ne(""))]
 
 
-def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_quote_totals(file_obj: Any) -> pd.DataFrame:
+    raw = pd.read_excel(file_obj)
+    totals = pd.DataFrame(
+        {
+            "quote_number": _safe_get(raw, 0, "Quote Number (A)").astype(str).str.strip(),
+            "user_id": _safe_get(raw, 3, "Entry Person (D)").astype(str).str.strip(),
+            "quote_date": pd.to_datetime(_safe_get(raw, 8, "Date Quoted (I)"), errors="coerce"),
+            "quote_amount": pd.to_numeric(_safe_get(raw, 9, "Quote Amount (J)"), errors="coerce"),
+            "customer_id": _safe_get(raw, 12, "Customer Number (M)").astype(str).str.strip(),
+        }
+    )
+    totals = totals[totals["quote_number"].ne("")].copy()
+    totals = totals.sort_values("quote_date").drop_duplicates(subset=["quote_number"], keep="last")
+    return totals
+
+
+def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame, min_line_match_ratio: float = 0.90) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if quotes.empty:
         empty = quotes.assign(converted=False)
         return empty, pd.DataFrame(), pd.DataFrame()
@@ -138,7 +154,8 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame) -> tuple[pd.DataF
         )
         .reset_index()
     )
-    quote_output["converted"] = quote_output["converted_lines"] > 0
+    quote_output["line_match_rate"] = (quote_output["converted_lines"] / quote_output["total_lines"]).fillna(0)
+    quote_output["converted"] = quote_output["line_match_rate"] >= min_line_match_ratio
     quote_output["follow_up_needed"] = ~quote_output["converted"]
 
     rep_summary = (
@@ -315,7 +332,8 @@ def build_follow_up_workbook(template_bytes: bytes, quotes_for_followup: pd.Data
             if "user_id" in col_map:
                 ws.cell(row=row_num, column=col_map["user_id"], value=assignee_name)
             if "quote_amount" in col_map:
-                ws.cell(row=row_num, column=col_map["quote_amount"], value=None)
+                quote_amount = rec.get("quote_amount")
+                ws.cell(row=row_num, column=col_map["quote_amount"], value=float(quote_amount) if pd.notna(quote_amount) else None)
             if "parts_quoted" in col_map:
                 ws.cell(row=row_num, column=col_map["parts_quoted"], value=int(rec.get("parts_quoted") or 0))
             if "converted_net_sales" in col_map:
@@ -375,21 +393,37 @@ def index():
         try:
             order_file = request.files.get("order_file")
             quote_file = request.files.get("quote_file")
+            quote_totals_file = request.files.get("quote_totals_file")
             template_file = request.files.get("template_file")
+            min_quote_amount = float(request.form.get("min_quote_amount") or 2000)
 
             if not order_file or not quote_file:
-                raise ValueError("Please upload both an order log file and a quote summary file.")
+                raise ValueError("Please upload both an order log file and a quote line summary file.")
 
             template_bytes = _resolve_template_bytes(template_file)
             orders = load_orders(order_file)
             quotes = load_quotes(quote_file)
+            quote_totals = load_quote_totals(quote_totals_file) if quote_totals_file and quote_totals_file.filename else pd.DataFrame()
 
-            line_results, rep_summary, quote_results = run_conversion(orders, quotes)
-            follow_up_quotes = quote_results[quote_results["follow_up_needed"]].copy()
+            line_results, rep_summary, quote_results = run_conversion(orders, quotes, min_line_match_ratio=0.90)
+
+            if not quote_totals.empty:
+                quote_results = quote_results.merge(
+                    quote_totals[["quote_number", "quote_amount"]],
+                    on="quote_number",
+                    how="left",
+                )
+            else:
+                quote_results["quote_amount"] = pd.NA
+
+            min_amount_mask = quote_results["quote_amount"].isna() | (quote_results["quote_amount"] >= min_quote_amount)
+            follow_up_quotes = quote_results[quote_results["follow_up_needed"] & min_amount_mask].copy()
             generated_report = build_follow_up_workbook(template_bytes, follow_up_quotes)
 
             quote_results_display = quote_results.sort_values(["quote_date", "quote_number"]).copy()
             quote_results_display["converted_net_sales"] = quote_results_display["converted_net_sales"].map(_format_currency)
+            quote_results_display["quote_amount"] = quote_results_display["quote_amount"].map(_format_currency)
+            quote_results_display["line_match_rate"] = quote_results_display["line_match_rate"].map(_format_percent)
             quote_results_html = quote_results_display.to_html(
                 index=False,
                 classes="results-table sortable-table",
