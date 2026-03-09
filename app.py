@@ -110,53 +110,131 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame, min_line_match_ra
     merged["days_to_convert"] = (merged["order_date"] - merged["quote_date"]).dt.days
     merged["valid_conversion"] = merged["days_to_convert"].notna() & (merged["days_to_convert"] >= 0)
 
-    converted_events = (
-        merged[merged["valid_conversion"]]
-        .sort_values("days_to_convert")
-        .groupby(["quote_number", "line_number"], as_index=False)
-        .first()
+    valid = merged[merged["valid_conversion"]].copy()
+
+    quote_lines = (
+        quotes.groupby("quote_number", dropna=False)
+        .agg(total_lines=("line_number", "nunique"))
+        .reset_index()
     )
 
-    line_output = quotes.merge(
-        converted_events[
-            [
-                "quote_number",
-                "line_number",
-                "order_number",
-                "order_date",
-                "net_sales",
-                "days_to_convert",
-            ]
-        ],
-        on=["quote_number", "line_number"],
-        how="left",
-    )
-    line_output["converted"] = line_output["order_number"].notna()
+    if valid.empty:
+        line_output = quotes.copy()
+        line_output["order_number"] = pd.NA
+        line_output["order_date"] = pd.NaT
+        line_output["net_sales"] = 0.0
+        line_output["days_to_convert"] = pd.NA
+        line_output["converted"] = False
 
-    def _first_non_empty(series: pd.Series) -> str:
-        for value in series:
-            if pd.notna(value) and str(value).strip() != "":
-                return str(value).strip()
-        return ""
+        def _first_non_empty(series: pd.Series) -> str:
+            for value in series:
+                if pd.notna(value) and str(value).strip() != "":
+                    return str(value).strip()
+            return ""
 
-    quote_output = (
-        line_output.groupby(["quote_number"], dropna=False)
+        quote_output = (
+            line_output.groupby(["quote_number"], dropna=False)
+            .agg(
+                customer_id=("customer_id", _first_non_empty),
+                customer_name=("customer_name", _first_non_empty),
+                user_id=("user_id", _first_non_empty),
+                quote_date=("quote_date", "min"),
+                parts_quoted=("part_number", "nunique"),
+                total_lines=("line_number", "nunique"),
+            )
+            .reset_index()
+        )
+        quote_output["matched_orders"] = ""
+        quote_output["converted_net_sales"] = 0.0
+        quote_output["converted_lines"] = 0
+        quote_output["line_match_rate"] = 0.0
+        quote_output["converted"] = False
+        quote_output["follow_up_needed"] = True
+    else:
+        line_order_best = (
+            valid.sort_values("days_to_convert")
+            .groupby(["quote_number", "line_number", "order_number"], as_index=False)
+            .first()
+        )
+
+        order_coverage = (
+            line_order_best.groupby(["quote_number", "order_number"], as_index=False)
+            .agg(
+                matched_lines=("line_number", "nunique"),
+                order_date=("order_date", "min"),
+                converted_net_sales=("net_sales", "sum"),
+            )
+            .merge(quote_lines, on="quote_number", how="left")
+        )
+        order_coverage["line_match_rate"] = (order_coverage["matched_lines"] / order_coverage["total_lines"]).fillna(0)
+
+        best_order = (
+            order_coverage.sort_values(["quote_number", "line_match_rate", "matched_lines", "order_date"], ascending=[True, False, False, True])
+            .groupby("quote_number", as_index=False)
+            .first()
+        )
+        best_order["converted"] = best_order["line_match_rate"] >= min_line_match_ratio
+
+        winning_line_matches = line_order_best.merge(
+            best_order[["quote_number", "order_number", "converted"]],
+            on=["quote_number", "order_number"],
+            how="inner",
+        )
+        winning_line_matches = winning_line_matches[winning_line_matches["converted"]].copy()
+
+        converted_lines = (
+            winning_line_matches.groupby("quote_number", as_index=False)
+            .agg(converted_lines=("line_number", "nunique"))
+        )
+
+        line_output = quotes.merge(
+            winning_line_matches[["quote_number", "line_number", "order_number", "order_date", "net_sales", "days_to_convert"]],
+            on=["quote_number", "line_number"],
+            how="left",
+        )
+        line_output["converted"] = line_output["order_number"].notna()
+
+        def _first_non_empty(series: pd.Series) -> str:
+            for value in series:
+                if pd.notna(value) and str(value).strip() != "":
+                    return str(value).strip()
+            return ""
+
+        quote_output = (
+            line_output.groupby(["quote_number"], dropna=False)
+            .agg(
+                customer_id=("customer_id", _first_non_empty),
+                customer_name=("customer_name", _first_non_empty),
+                user_id=("user_id", _first_non_empty),
+                quote_date=("quote_date", "min"),
+                parts_quoted=("part_number", "nunique"),
+                total_lines=("line_number", "nunique"),
+            )
+            .reset_index()
+            .merge(best_order[["quote_number", "order_number", "order_date", "converted_net_sales", "line_match_rate", "converted"]], on="quote_number", how="left")
+            .merge(converted_lines, on="quote_number", how="left")
+        )
+        quote_output["converted_lines"] = quote_output["converted_lines"].fillna(0).astype(int)
+        quote_output["converted"] = quote_output["converted"].astype("boolean").fillna(False).astype(bool)
+        quote_output["line_match_rate"] = quote_output["line_match_rate"].fillna(0.0)
+        quote_output["converted_net_sales"] = quote_output["converted_net_sales"].fillna(0.0)
+        quote_output["matched_orders"] = quote_output.apply(
+            lambda r: str(r["order_number"]) if bool(r["converted"]) and pd.notna(r["order_number"]) else "",
+            axis=1,
+        )
+        quote_output = quote_output.drop(columns=["order_number"])
+        quote_output["follow_up_needed"] = ~quote_output["converted"]
+
+    rep_summary = (
+        quote_output.groupby("user_id", dropna=False)
         .agg(
-            customer_id=("customer_id", _first_non_empty),
-            customer_name=("customer_name", _first_non_empty),
-            user_id=("user_id", _first_non_empty),
-            quote_date=("quote_date", "min"),
-            parts_quoted=("part_number", "nunique"),
-            matched_orders=("order_number", lambda s: ", ".join(sorted({v for v in s.dropna().astype(str) if v}))),
-            converted_net_sales=("net_sales", "sum"),
-            converted_lines=("converted", "sum"),
-            total_lines=("line_number", "count"),
+            consolidated_quotes=("quote_number", "count"),
+            converted_quotes=("converted", "sum"),
+            converted_net_sales=("converted_net_sales", "sum"),
         )
         .reset_index()
     )
-    quote_output["line_match_rate"] = (quote_output["converted_lines"] / quote_output["total_lines"]).fillna(0)
-    quote_output["converted"] = quote_output["line_match_rate"] >= min_line_match_ratio
-    quote_output["follow_up_needed"] = ~quote_output["converted"]
+    rep_summary["conversion_rate"] = (rep_summary["converted_quotes"] / rep_summary["consolidated_quotes"]).fillna(0)
 
     rep_summary = (
         quote_output.groupby("user_id", dropna=False)
@@ -424,6 +502,24 @@ def index():
             quote_results_display["converted_net_sales"] = quote_results_display["converted_net_sales"].map(_format_currency)
             quote_results_display["quote_amount"] = quote_results_display["quote_amount"].map(_format_currency)
             quote_results_display["line_match_rate"] = quote_results_display["line_match_rate"].map(_format_percent)
+            quote_results_display = quote_results_display.rename(
+                columns={
+                    "quote_number": "Quote Number",
+                    "customer_id": "Customer ID",
+                    "customer_name": "Customer Name",
+                    "user_id": "Parts Rep",
+                    "quote_date": "Quote Date",
+                    "parts_quoted": "Parts Quoted",
+                    "matched_orders": "Matched Orders",
+                    "converted_net_sales": "Converted Net Sales",
+                    "converted_lines": "Converted Lines",
+                    "total_lines": "Total Lines",
+                    "line_match_rate": "Line Match Rate",
+                    "converted": "Converted",
+                    "follow_up_needed": "Follow Up Needed",
+                    "quote_amount": "Quote Amount",
+                }
+            )
             quote_results_html = quote_results_display.to_html(
                 index=False,
                 classes="results-table sortable-table",
