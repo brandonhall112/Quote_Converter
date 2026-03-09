@@ -452,6 +452,8 @@ def _open_browser() -> None:
 
 
 if __name__ == "__main__":
-    if not os.environ.get("CI"):
+    port = int(os.environ.get("PORT", "8000"))
+    is_local_dev = not os.environ.get("CI") and not os.environ.get("PORT")
+    if is_local_dev:
         Timer(1.0, _open_browser).start()
-    app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
