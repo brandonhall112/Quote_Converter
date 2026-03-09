@@ -1,38 +1,86 @@
 # Quote Conversion Follow-up Tool
 
-This repository builds a click-to-launch Windows app from GitHub Actions and produces a follow-up workbook aligned to your follow-up template.
+This app takes your Order Log + Quote Summary and creates a follow-up workbook using your `Parts Follow Up Template.xlsx`.
 
-## What changed for your workflow
+## What it does
 
 - No date range selectors in the UI.
 - No conversion window selector in the UI.
-- Analysis period is driven strictly by the uploaded files.
-- Output is consolidated at the **quote number** level (not line-by-line follow-up output).
-- Output workbook is generated from your **Parts Follow Up Template.xlsx** so formulas/summary logic are preserved.
+- Analysis period is controlled by the files you upload.
+- Follow-up output is consolidated by **quote number**.
+- Output workbook keeps your template layout/formulas.
 
 ## Inputs
 
-- Order Log Excel (uses columns D, E, G, O, U)
-- Quote Summary Excel (uses columns A, B, C, AJ, AW, BJ)
+- Order Log Excel (columns D, E, G, O, U)
+- Quote Line Summary Excel (columns A, B, C, AJ, AW, BJ)
+- Quote Totals Summary Excel (optional; columns A, D, I, J, M)
 - Parts Follow Up Template Excel
-  - If not uploaded in the form, the app will look for:
-  - `assets/Parts Follow Up Template.xlsx`
+  - If not uploaded in the form, app uses `assets/Parts Follow Up Template.xlsx`
 
 ## Output
 
-- Download: `Parts_Follow_Up_Output.xlsx`
-- Uses your template workbook as a base.
-- Populates follow-up quote rows by rep/owner tab where possible.
-- Keeps formula cells and summary tabs from the original template.
+- Download file: `Parts_Follow_Up_Output.xlsx`
+- Minimum follow-up floor defaults to `$2,000` (configurable in UI).
+- A quote is only considered converted when at least `90%` of its lines match to orders.
 
-## No-terminal workflow (GitHub Actions)
+---
 
-1. In GitHub, open **Actions**.
-2. Run **Build Windows App**.
-3. Download `QuoteConverter-windows` artifact.
-4. Double-click `QuoteConverter.exe`.
-5. Browser opens to the app.
+## Render setup (super simple)
 
-## Troubleshooting
+### 1) Push this repo to GitHub
+Make sure your latest code is on `main`.
 
-If Codex says it cannot update an externally changed PR, create a **new PR** from latest `main`.
+### 2) In Render, create a new service from Blueprint (recommended)
+- Click **New +**
+- Click **Blueprint**
+- Choose this GitHub repo
+- Render will read `render.yaml` and auto-fill settings
+
+If you do not use Blueprint, create a normal Web Service and copy the same settings manually.
+
+### 3) Fill in these exact settings
+- **Runtime:** Python
+- **Build Command:**
+  ```bash
+  pip install -r requirements.txt
+  ```
+- **Start Command:**
+  ```bash
+  gunicorn app:app
+  ```
+
+### 4) Click Deploy
+Render will build and start your app.
+
+### 5) Open your app URL
+Render gives you a URL like:
+- `https://your-app-name.onrender.com`
+
+That link is your always-online app (as long as the Render service is running).
+
+### 6) If Render still shows Python 3.14, force-sync and clear cache
+In your Render service:
+- Open **Settings**
+- Set **Python Version** to `3.11.9` (if visible)
+- In **Environment**, add:
+  - Key: `PYTHON_VERSION`
+  - Value: `3.11.9`
+- Save changes
+- Click **Manual Deploy** -> **Clear build cache & deploy**
+
+Why: your error log shows Render building with Python 3.14.3, which causes pandas to compile from source and fail.
+
+---
+
+## Notes
+
+- `gunicorn` is included in `requirements.txt` for Render.
+- `.python-version` pins Python to `3.11.9` (Render checks this).
+- `runtime.txt` pins Python to `3.11.9` for hosts that honor runtime files.
+- `render.yaml` sets `PYTHON_VERSION=3.11.9` for Blueprint deploys.
+- `app.py` is set to use Render's `PORT` automatically.
+- Local run still works with:
+  ```bash
+  python app.py
+  ```

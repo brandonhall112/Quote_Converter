@@ -128,7 +128,7 @@
   <div class="container">
     <div class="card">
       <h2>Run Analysis</h2>
-      <p class="note">No date picker or conversion window is required. The uploaded file range controls the analysis period.</p>
+      <p class="note">No date picker or conversion window is required. The uploaded file range controls the analysis period. A quote is now only marked converted when at least 90% of its lines match.</p>
       <form method="post" enctype="multipart/form-data">
         <div class="row">
           <div class="field">
@@ -138,6 +138,14 @@
           <div class="field">
             <label>Quote Summary (Excel)</label>
             <input type="file" name="quote_file" accept=".xlsx,.xls" required>
+          </div>
+          <div class="field">
+            <label>Quote Totals Summary (optional, Excel)</label>
+            <input type="file" name="quote_totals_file" accept=".xlsx,.xls">
+          </div>
+          <div class="field">
+            <label>Minimum Quote Amount for Follow-up ($)</label>
+            <input type="number" name="min_quote_amount" value="2000" min="0" step="100">
           </div>
           <div class="field">
             <label>Parts Follow Up Template (Excel)</label>
@@ -168,5 +176,60 @@
     </div>
     {% endif %}
   </div>
+
+  <script>
+    (function () {
+      const toNumber = (value) => {
+        const cleaned = value.replace(/[$,%\s,]/g, '');
+        const n = Number(cleaned);
+        return Number.isFinite(n) ? n : null;
+      };
+
+      const makeSortable = (tableId) => {
+        const table = document.getElementById(tableId);
+        if (!table || !table.tHead || table.tHead.rows.length === 0 || !table.tBodies.length) return;
+
+        const headerCells = Array.from(table.tHead.rows[0].cells);
+        const tbody = table.tBodies[0];
+
+        headerCells.forEach((th, index) => {
+          th.style.cursor = 'pointer';
+          th.title = 'Click to sort ascending/descending';
+          th.dataset.sortDir = 'none';
+
+          th.addEventListener('click', () => {
+            const currentDir = th.dataset.sortDir === 'asc' ? 'desc' : 'asc';
+            headerCells.forEach((cell) => {
+              cell.dataset.sortDir = 'none';
+              cell.textContent = cell.textContent.replace(/\s*[▲▼]$/, '');
+            });
+            th.dataset.sortDir = currentDir;
+            th.textContent = `${th.textContent.replace(/\s*[▲▼]$/, '')} ${currentDir === 'asc' ? '▲' : '▼'}`;
+
+            const rows = Array.from(tbody.rows);
+            rows.sort((a, b) => {
+              const aText = (a.cells[index]?.textContent || '').trim();
+              const bText = (b.cells[index]?.textContent || '').trim();
+              const aNum = toNumber(aText);
+              const bNum = toNumber(bText);
+
+              let cmp = 0;
+              if (aNum !== null && bNum !== null) {
+                cmp = aNum - bNum;
+              } else {
+                cmp = aText.localeCompare(bText, undefined, { numeric: true, sensitivity: 'base' });
+              }
+              return currentDir === 'asc' ? cmp : -cmp;
+            });
+
+            rows.forEach((row) => tbody.appendChild(row));
+          });
+        });
+      };
+
+      makeSortable('quote-results-table');
+      makeSortable('rep-summary-table');
+    })();
+  </script>
 </body>
 </html>
