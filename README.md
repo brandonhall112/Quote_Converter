@@ -28,11 +28,13 @@ This app takes your Order Log + Quote Summary and creates a follow-up workbook u
 ### 1) Push this repo to GitHub
 Make sure your latest code is on `main`.
 
-### 2) In Render, create a new Web Service
+### 2) In Render, create a new service from Blueprint (recommended)
 - Click **New +**
-- Click **Web Service**
+- Click **Blueprint**
 - Choose this GitHub repo
-- Branch: `main`
+- Render will read `render.yaml` and auto-fill settings, including Python 3.11.9
+
+If you do not use Blueprint, create a normal Web Service and copy the same settings manually.
 
 ### 3) Fill in these exact settings
 - **Runtime:** Python
@@ -54,16 +56,17 @@ Render gives you a URL like:
 
 That link is your always-online app (as long as the Render service is running).
 
-### 6) Important: force Python 3.11 on Render (fixes your pandas build error)
+### 6) If Render still shows Python 3.14, force-sync the version
 In your Render service:
 - Open **Settings**
-- Find **Environment**
-- Add this variable:
+- Set **Python Version** to `3.11.9` (if visible)
+- In **Environment**, add:
   - Key: `PYTHON_VERSION`
   - Value: `3.11.9`
-- Save changes and click **Manual Deploy** -> **Deploy latest commit**
+- Save changes
+- Click **Manual Deploy** -> **Clear build cache & deploy**
 
-Why: your failed build log shows Render tried Python 3.14, and pandas currently does not have a compatible wheel path there for your stack.
+Why: your error log shows Render building with Python 3.14.3, which causes pandas to compile from source and fail.
 
 ---
 
@@ -71,6 +74,7 @@ Why: your failed build log shows Render tried Python 3.14, and pandas currently 
 
 - `gunicorn` is included in `requirements.txt` for Render.
 - `runtime.txt` pins Python to `3.11.9` for hosts that honor runtime files.
+- `render.yaml` also pins Python to `3.11.9` so Blueprint deploys use the right version automatically.
 - `app.py` is set to use Render's `PORT` automatically.
 - Local run still works with:
   ```bash
