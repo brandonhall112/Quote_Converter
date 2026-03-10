@@ -9,6 +9,7 @@ import os
 from typing import Any
 import sys
 import webbrowser
+import json
 
 import pandas as pd
 from flask import Flask, render_template, request, send_file
@@ -33,6 +34,7 @@ class ColumnMap:
     quote_customer_name: int = 36  # AK
     quote_date: int = 48  # AW
     quote_user: int = 61  # BJ
+    quote_ext_price: int = 13  # N
 
 
 COLUMNS = ColumnMap()
@@ -73,26 +75,11 @@ def load_quotes(file_obj: Any) -> pd.DataFrame:
             "customer_name": _safe_get(raw, COLUMNS.quote_customer_name, "Customer Name (AK)").astype(str).str.strip(),
             "quote_date": pd.to_datetime(_safe_get(raw, COLUMNS.quote_date, "Date Quoted (AW)"), errors="coerce"),
             "user_id": _safe_get(raw, COLUMNS.quote_user, "User ID (BJ)").astype(str).str.strip(),
+            "ext_price": pd.to_numeric(_safe_get(raw, COLUMNS.quote_ext_price, "Ext. Price (N)"), errors="coerce").fillna(0.0),
         }
     )
     quotes = quotes.dropna(subset=["quote_date"]).copy()
     return quotes[(quotes["part_number"].ne("")) & (quotes["quote_number"].ne(""))]
-
-
-def load_quote_totals(file_obj: Any) -> pd.DataFrame:
-    raw = pd.read_excel(file_obj)
-    totals = pd.DataFrame(
-        {
-            "quote_number": _safe_get(raw, 0, "Quote Number (A)").astype(str).str.strip(),
-            "user_id": _safe_get(raw, 3, "Entry Person (D)").astype(str).str.strip(),
-            "quote_date": pd.to_datetime(_safe_get(raw, 8, "Date Quoted (I)"), errors="coerce"),
-            "quote_amount": pd.to_numeric(_safe_get(raw, 9, "Quote Amount (J)"), errors="coerce"),
-            "customer_id": _safe_get(raw, 12, "Customer Number (M)").astype(str).str.strip(),
-        }
-    )
-    totals = totals[totals["quote_number"].ne("")].copy()
-    totals = totals.sort_values("quote_date").drop_duplicates(subset=["quote_number"], keep="last")
-    return totals
 
 
 def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame, min_line_match_ratio: float = 0.90) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -141,6 +128,7 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame, min_line_match_ra
                 quote_date=("quote_date", "min"),
                 parts_quoted=("part_number", "nunique"),
                 total_lines=("line_number", "nunique"),
+                quote_amount=("ext_price", "sum"),
             )
             .reset_index()
         )
@@ -209,6 +197,7 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame, min_line_match_ra
                 quote_date=("quote_date", "min"),
                 parts_quoted=("part_number", "nunique"),
                 total_lines=("line_number", "nunique"),
+                quote_amount=("ext_price", "sum"),
             )
             .reset_index()
             .merge(best_order[["quote_number", "order_number", "order_date", "converted_net_sales", "line_match_rate", "converted"]], on="quote_number", how="left")
@@ -224,17 +213,6 @@ def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame, min_line_match_ra
         )
         quote_output = quote_output.drop(columns=["order_number"])
         quote_output["follow_up_needed"] = ~quote_output["converted"]
-
-    rep_summary = (
-        quote_output.groupby("user_id", dropna=False)
-        .agg(
-            consolidated_quotes=("quote_number", "count"),
-            converted_quotes=("converted", "sum"),
-            converted_net_sales=("converted_net_sales", "sum"),
-        )
-        .reset_index()
-    )
-    rep_summary["conversion_rate"] = (rep_summary["converted_quotes"] / rep_summary["consolidated_quotes"]).fillna(0)
 
     rep_summary = (
         quote_output.groupby("user_id", dropna=False)
@@ -465,6 +443,8 @@ def _format_percent(value: Any) -> str:
 def index():
     quote_results_html = None
     rep_results_html = None
+    rep_chart_data = "[]"
+    followup_chart_data = "[]"
     error = None
 
     if request.method == "POST":
@@ -485,16 +465,9 @@ def index():
 
             line_results, rep_summary, quote_results = run_conversion(orders, quotes, min_line_match_ratio=0.90)
 
-            if not quote_totals.empty:
-                quote_results = quote_results.merge(
-                    quote_totals[["quote_number", "quote_amount"]],
-                    on="quote_number",
-                    how="left",
-                )
-            else:
-                quote_results["quote_amount"] = pd.NA
+            line_results, rep_summary, quote_results = run_conversion(orders, quotes, min_line_match_ratio=0.90)
 
-            min_amount_mask = quote_results["quote_amount"].isna() | (quote_results["quote_amount"] >= min_quote_amount)
+            min_amount_mask = quote_results["quote_amount"].fillna(0) >= min_quote_amount
             follow_up_quotes = quote_results[quote_results["follow_up_needed"] & min_amount_mask].copy()
             generated_report = build_follow_up_workbook(template_bytes, follow_up_quotes)
 
@@ -544,6 +517,33 @@ def index():
                 table_id="rep-summary-table",
             )
 
+            rep_chart = rep_summary.sort_values("conversion_rate", ascending=False).copy()
+            rep_chart_data = json.dumps(
+                [
+                    {
+                        "rep": str(r.user_id or "Unassigned"),
+                        "conversion_rate": float(r.conversion_rate),
+                    }
+                    for r in rep_chart.itertuples()
+                ]
+            )
+            followup_counts = (
+                quote_results[quote_results["follow_up_needed"]]
+                .groupby("user_id", dropna=False)
+                .size()
+                .reset_index(name="count")
+                .sort_values("count", ascending=False)
+            )
+            followup_chart_data = json.dumps(
+                [
+                    {
+                        "rep": str(r.user_id or "Unassigned"),
+                        "count": int(r.count),
+                    }
+                    for r in followup_counts.itertuples()
+                ]
+            )
+
             app.config["last_quote_results"] = quote_results
             app.config["last_rep_results"] = rep_summary
             app.config["last_followup_workbook"] = generated_report
@@ -554,6 +554,8 @@ def index():
         "index.html",
         quote_results_html=quote_results_html,
         rep_results_html=rep_results_html,
+        rep_chart_data=rep_chart_data,
+        followup_chart_data=followup_chart_data,
         error=error,
     )
 
