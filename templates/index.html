@@ -107,6 +107,11 @@
     .results-wrap { overflow-x: auto; }
     .download { margin-bottom: .7rem; display: flex; gap: .6rem; }
     .note { color: var(--dark-gray); }
+    .viz-grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap:1rem; }
+    .viz-card { background:#f8fafc; border:1px solid #dbe5ef; border-radius:10px; padding:.8rem; }
+    .viz-row { display:grid; grid-template-columns: 130px 1fr 56px; gap:.5rem; align-items:center; margin:.45rem 0; font-size:.86rem; }
+    .bar-wrap { background:#e5edf5; border-radius:999px; height:10px; overflow:hidden; }
+    .bar { height:10px; background:linear-gradient(90deg,var(--orange),var(--dark-blue)); }
   </style>
 </head>
 <body>
@@ -128,7 +133,7 @@
   <div class="container">
     <div class="card">
       <h2>Run Analysis</h2>
-      <p class="note">No date picker or conversion window is required. The uploaded file range controls the analysis period.</p>
+      <p class="note">No date picker or conversion window is required. The uploaded file range controls the analysis period. A quote is now only marked converted when at least 90% of its lines match.</p>
       <form method="post" enctype="multipart/form-data">
         <div class="row">
           <div class="field">
@@ -136,8 +141,12 @@
             <input type="file" name="order_file" accept=".xlsx,.xls" required>
           </div>
           <div class="field">
-            <label>Quote Summary (Excel)</label>
+            <label>Quote Lines Summary (Excel; includes Ext. Price column N)</label>
             <input type="file" name="quote_file" accept=".xlsx,.xls" required>
+          </div>
+          <div class="field">
+            <label>Minimum Quote Amount for Follow-up ($)</label>
+            <input type="number" name="min_quote_amount" value="2000" min="0" step="100">
           </div>
           <div class="field">
             <label>Parts Follow Up Template (Excel)</label>
@@ -152,6 +161,20 @@
     </div>
 
     {% if rep_results_html %}
+    <div class="card">
+      <h2>Visual Insights</h2>
+      <div class="viz-grid">
+        <div class="viz-card">
+          <h3 style="margin:.2rem 0 .6rem 0;">Conversion Rate by Rep</h3>
+          <div id="conversion-chart"></div>
+        </div>
+        <div class="viz-card">
+          <h3 style="margin:.2rem 0 .6rem 0;">Follow-ups Needed by Rep</h3>
+          <div id="followup-chart"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h2>Rep Summary</h2>
       <div class="download">
@@ -168,5 +191,81 @@
     </div>
     {% endif %}
   </div>
+
+  <script>
+    (function () {
+      const toNumber = (value) => {
+        const cleaned = value.replace(/[$,%\s,]/g, '');
+        const n = Number(cleaned);
+        return Number.isFinite(n) ? n : null;
+      };
+
+      const makeSortable = (tableId) => {
+        const table = document.getElementById(tableId);
+        if (!table || !table.tHead || table.tHead.rows.length === 0 || !table.tBodies.length) return;
+
+        const headerCells = Array.from(table.tHead.rows[0].cells);
+        const tbody = table.tBodies[0];
+
+        headerCells.forEach((th, index) => {
+          th.style.cursor = 'pointer';
+          th.title = 'Click to sort ascending/descending';
+          th.dataset.sortDir = 'none';
+
+          th.addEventListener('click', () => {
+            const currentDir = th.dataset.sortDir === 'asc' ? 'desc' : 'asc';
+            headerCells.forEach((cell) => {
+              cell.dataset.sortDir = 'none';
+              cell.textContent = cell.textContent.replace(/\s*[▲▼]$/, '');
+            });
+            th.dataset.sortDir = currentDir;
+            th.textContent = `${th.textContent.replace(/\s*[▲▼]$/, '')} ${currentDir === 'asc' ? '▲' : '▼'}`;
+
+            const rows = Array.from(tbody.rows);
+            rows.sort((a, b) => {
+              const aText = (a.cells[index]?.textContent || '').trim();
+              const bText = (b.cells[index]?.textContent || '').trim();
+              const aNum = toNumber(aText);
+              const bNum = toNumber(bText);
+
+              let cmp = 0;
+              if (aNum !== null && bNum !== null) {
+                cmp = aNum - bNum;
+              } else {
+                cmp = aText.localeCompare(bText, undefined, { numeric: true, sensitivity: 'base' });
+              }
+              return currentDir === 'asc' ? cmp : -cmp;
+            });
+
+            rows.forEach((row) => tbody.appendChild(row));
+          });
+        });
+      };
+
+      makeSortable('quote-results-table');
+      makeSortable('rep-summary-table');
+
+      const repData = {{ rep_chart_data | safe }};
+      const followupData = {{ followup_chart_data | safe }};
+
+      const renderBars = (targetId, rows, valueKey, formatter) => {
+        const target = document.getElementById(targetId);
+        if (!target) return;
+        if (!rows || !rows.length) {
+          target.innerHTML = '<p class="note">No data yet. Run an analysis.</p>';
+          return;
+        }
+        const maxVal = Math.max(...rows.map(r => Number(r[valueKey] || 0)), 0);
+        target.innerHTML = rows.map(r => {
+          const val = Number(r[valueKey] || 0);
+          const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+          return `<div class="viz-row"><div>${r.rep}</div><div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div><div style="text-align:right;">${formatter(val)}</div></div>`;
+        }).join('');
+      };
+
+      renderBars('conversion-chart', repData, 'conversion_rate', v => `${(v*100).toFixed(1)}%`);
+      renderBars('followup-chart', followupData, 'count', v => `${Math.round(v)}`);
+    })();
+  </script>
 </body>
 </html>
