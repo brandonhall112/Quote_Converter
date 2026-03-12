@@ -84,8 +84,41 @@ def load_quotes(file_obj: Any) -> pd.DataFrame:
 
 def run_conversion(orders: pd.DataFrame, quotes: pd.DataFrame, min_line_match_ratio: float = 0.90) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if quotes.empty:
-        empty = quotes.assign(converted=False)
-        return empty, pd.DataFrame(), pd.DataFrame()
+        line_output = quotes.copy()
+        line_output["order_number"] = pd.NA
+        line_output["order_date"] = pd.NaT
+        line_output["net_sales"] = 0.0
+        line_output["days_to_convert"] = pd.NA
+        line_output["converted"] = False
+
+        quote_output = pd.DataFrame(
+            columns=[
+                "quote_number",
+                "customer_id",
+                "customer_name",
+                "user_id",
+                "quote_date",
+                "parts_quoted",
+                "total_lines",
+                "quote_amount",
+                "matched_orders",
+                "converted_net_sales",
+                "converted_lines",
+                "line_match_rate",
+                "converted",
+                "follow_up_needed",
+            ]
+        )
+        rep_summary = pd.DataFrame(
+            columns=[
+                "user_id",
+                "consolidated_quotes",
+                "converted_quotes",
+                "converted_net_sales",
+                "conversion_rate",
+            ]
+        )
+        return line_output, rep_summary, quote_output
 
     merged = quotes.merge(
         orders,
