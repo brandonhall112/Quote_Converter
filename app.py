@@ -523,6 +523,7 @@ def index():
         try:
             order_file = request.files.get("order_file")
             quote_file = request.files.get("quote_file")
+            quote_totals_file = request.files.get("quote_totals_file")
             template_file = request.files.get("template_file")
             min_quote_amount = float(request.form.get("min_quote_amount") or 2000)
 
@@ -532,6 +533,7 @@ def index():
             template_bytes = _resolve_template_bytes(template_file)
             orders = load_orders(order_file)
             quotes = load_quotes(quote_file)
+            quote_totals = load_quote_totals(quote_totals_file) if quote_totals_file and quote_totals_file.filename else pd.DataFrame()
 
             line_results, rep_summary, quote_results = run_conversion(orders, quotes, min_line_match_ratio=0.90)
             quote_results = _ensure_quote_output_schema(quote_results)
