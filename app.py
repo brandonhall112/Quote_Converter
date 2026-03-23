@@ -525,6 +525,7 @@ def index():
         try:
             order_file = request.files.get("order_file")
             quote_file = request.files.get("quote_file")
+            quote_totals_file = request.files.get("quote_totals_file")
             template_file = request.files.get("template_file")
             min_quote_amount = float(request.form.get("min_quote_amount") or 2000)
             submit_action = (request.form.get("submit_action") or "download").strip().lower()
