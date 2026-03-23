@@ -373,6 +373,8 @@ def build_follow_up_workbook(template_bytes: bytes, quotes_for_followup: pd.Data
     wb = load_workbook(BytesIO(template_bytes))
 
     quotes_for_followup = _ensure_quote_output_schema(quotes_for_followup)
+    if "user_id" not in quotes_for_followup.columns:
+        quotes_for_followup["user_id"] = ""
     if quotes_for_followup.empty:
         out = BytesIO()
         wb.save(out)
@@ -539,6 +541,14 @@ def index():
             quote_results = _ensure_quote_output_schema(quote_results)
             rep_summary = _ensure_rep_summary_schema(rep_summary)
 
+            line_results, rep_summary, quote_results = run_conversion(orders, quotes, min_line_match_ratio=0.90)
+            quote_results = _ensure_quote_output_schema(quote_results)
+            rep_summary = _ensure_rep_summary_schema(rep_summary)
+            if "user_id" not in quote_results.columns:
+                quote_results["user_id"] = ""
+            if "user_id" not in rep_summary.columns:
+                rep_summary["user_id"] = ""
+
             min_amount_mask = quote_results["quote_amount"].fillna(0) >= min_quote_amount
             follow_up_quotes = quote_results[quote_results["follow_up_needed"] & min_amount_mask].copy()
             generated_report = build_follow_up_workbook(template_bytes, follow_up_quotes)
@@ -599,8 +609,11 @@ def index():
                     for r in rep_chart.itertuples()
                 ]
             )
+            followup_source = quote_results[quote_results["follow_up_needed"]].copy()
+            if "user_id" not in followup_source.columns:
+                followup_source["user_id"] = ""
             followup_counts = (
-                quote_results[quote_results["follow_up_needed"]]
+                followup_source
                 .groupby("user_id", dropna=False)
                 .size()
                 .reset_index(name="count")
