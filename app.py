@@ -49,6 +49,15 @@ def _safe_get(df: pd.DataFrame, idx: int, name: str) -> pd.Series:
     return df.iloc[:, idx]
 
 
+def _to_numeric_amount(series: pd.Series) -> pd.Series:
+    cleaned = (
+        series.astype(str)
+        .str.replace(r"[^\d.\-]", "", regex=True)
+        .replace({"": pd.NA, "-": pd.NA, ".": pd.NA, "-.": pd.NA})
+    )
+    return pd.to_numeric(cleaned, errors="coerce").fillna(0.0)
+
+
 def load_orders(file_obj: Any) -> pd.DataFrame:
     raw = pd.read_excel(file_obj)
     orders = pd.DataFrame(
@@ -57,7 +66,7 @@ def load_orders(file_obj: Any) -> pd.DataFrame:
             "order_date": pd.to_datetime(_safe_get(raw, COLUMNS.order_date, "Order Date (D)"), errors="coerce"),
             "customer_id": _safe_get(raw, COLUMNS.order_customer, "Customer ID (G)").astype(str).str.strip(),
             "part_number": _safe_get(raw, COLUMNS.order_part, "Part Number (O)").astype(str).str.strip().str.upper(),
-            "net_sales": pd.to_numeric(_safe_get(raw, COLUMNS.order_net_sales, "Net Sales (U)"), errors="coerce").fillna(0.0),
+            "net_sales": _to_numeric_amount(_safe_get(raw, COLUMNS.order_net_sales, "Net Sales (U)")),
         }
     )
     orders = orders.dropna(subset=["order_date"]).copy()
@@ -75,7 +84,7 @@ def load_quotes(file_obj: Any) -> pd.DataFrame:
             "customer_name": _safe_get(raw, COLUMNS.quote_customer_name, "Customer Name (AK)").astype(str).str.strip(),
             "quote_date": pd.to_datetime(_safe_get(raw, COLUMNS.quote_date, "Date Quoted (AW)"), errors="coerce"),
             "user_id": _safe_get(raw, COLUMNS.quote_user, "User ID (BJ)").astype(str).str.strip(),
-            "ext_price": pd.to_numeric(_safe_get(raw, COLUMNS.quote_ext_price, "Ext. Price (N)"), errors="coerce").fillna(0.0),
+            "ext_price": _to_numeric_amount(_safe_get(raw, COLUMNS.quote_ext_price, "Ext. Price (N)")),
         }
     )
     quotes = quotes.dropna(subset=["quote_date"]).copy()
@@ -551,6 +560,15 @@ def index():
             app.config["last_followup_workbook"] = generated_report
 
             if submit_action == "download":
+                if follow_up_quotes.empty:
+                    total_quotes = int(len(quote_results))
+                    follow_up_total = int(quote_results["follow_up_needed"].fillna(False).sum())
+                    raise ValueError(
+                        "No follow-up rows qualified for the workbook. "
+                        f"Quotes analyzed: {total_quotes}; follow-up needed: {follow_up_total}; "
+                        f"minimum quote amount filter: ${min_quote_amount:,.0f}. "
+                        "Try lowering the minimum quote amount."
+                    )
                 return send_file(
                     BytesIO(generated_report),
                     as_attachment=True,
