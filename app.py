@@ -545,17 +545,24 @@ def index():
             template_bytes = _resolve_template_bytes(template_file)
             orders = load_orders(order_file)
             quotes = load_quotes(quote_file)
+            if orders.empty:
+                raise ValueError(
+                    "No usable order rows were found after parsing. "
+                    "Check Order Date (D), Customer ID (G), and Part Number (O)."
+                )
+            if quotes.empty:
+                raise ValueError(
+                    "No usable quote rows were found after parsing. "
+                    "Check Quote Number (A), Part Number (C), and Date Quoted (AW)."
+                )
 
-            line_results, rep_summary, quote_results = run_conversion(orders, quotes, min_line_match_ratio=0.90)
-            quote_results = _ensure_quote_output_schema(quote_results)
-            rep_summary = _ensure_rep_summary_schema(rep_summary)
-            if "user_id" not in quote_results.columns:
-                quote_results["user_id"] = ""
-            if "user_id" not in rep_summary.columns:
-                rep_summary["user_id"] = ""
-
-            min_amount_mask = quote_results["quote_amount"].fillna(0) >= min_quote_amount
-            follow_up_quotes = quote_results[quote_results["follow_up_needed"] & min_amount_mask].copy()
+            line_results, rep_summary, quote_results = run_conversion(orders, quotes)
+            follow_up_quotes = quote_results[quote_results["follow_up_needed"]].copy()
+            if follow_up_quotes.empty:
+                raise ValueError(
+                    "Analysis completed, but there are no follow-up quotes to write. "
+                    "All parsed quotes are currently marked as converted."
+                )
             generated_report = build_follow_up_workbook(template_bytes, follow_up_quotes)
             app.config["last_followup_workbook"] = generated_report
 
