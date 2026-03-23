@@ -528,6 +528,7 @@ def index():
             quote_totals_file = request.files.get("quote_totals_file")
             template_file = request.files.get("template_file")
             min_quote_amount = float(request.form.get("min_quote_amount") or 2000)
+            submit_action = (request.form.get("submit_action") or "download").strip().lower()
 
             if not order_file or not quote_file:
                 raise ValueError("Please upload both an order log file and a quote line summary file.")
@@ -535,11 +536,6 @@ def index():
             template_bytes = _resolve_template_bytes(template_file)
             orders = load_orders(order_file)
             quotes = load_quotes(quote_file)
-            quote_totals = load_quote_totals(quote_totals_file) if quote_totals_file and quote_totals_file.filename else pd.DataFrame()
-
-            line_results, rep_summary, quote_results = run_conversion(orders, quotes, min_line_match_ratio=0.90)
-            quote_results = _ensure_quote_output_schema(quote_results)
-            rep_summary = _ensure_rep_summary_schema(rep_summary)
 
             line_results, rep_summary, quote_results = run_conversion(orders, quotes, min_line_match_ratio=0.90)
             quote_results = _ensure_quote_output_schema(quote_results)
@@ -552,6 +548,15 @@ def index():
             min_amount_mask = quote_results["quote_amount"].fillna(0) >= min_quote_amount
             follow_up_quotes = quote_results[quote_results["follow_up_needed"] & min_amount_mask].copy()
             generated_report = build_follow_up_workbook(template_bytes, follow_up_quotes)
+            app.config["last_followup_workbook"] = generated_report
+
+            if submit_action == "download":
+                return send_file(
+                    BytesIO(generated_report),
+                    as_attachment=True,
+                    download_name="Parts_Follow_Up_Output.xlsx",
+                    mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
 
             quote_results_display = quote_results.sort_values(["quote_date", "quote_number"]).copy()
             quote_results_display["converted_net_sales"] = quote_results_display["converted_net_sales"].map(_format_currency)
@@ -631,7 +636,6 @@ def index():
 
             app.config["last_quote_results"] = quote_results
             app.config["last_rep_results"] = rep_summary
-            app.config["last_followup_workbook"] = generated_report
         except Exception as exc:
             error = str(exc)
 
