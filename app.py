@@ -372,7 +372,7 @@ def _assign_sheet_for_rep(workbook, rep: str):
 def build_follow_up_workbook(template_bytes: bytes, quotes_for_followup: pd.DataFrame) -> bytes:
     wb = load_workbook(BytesIO(template_bytes))
 
-    quotes_for_followup = quotes_for_followup.copy()
+    quotes_for_followup = _ensure_quote_output_schema(quotes_for_followup)
     if quotes_for_followup.empty:
         out = BytesIO()
         wb.save(out)
@@ -460,6 +460,45 @@ def _resolve_template_bytes(uploaded_template) -> bytes:
 
 
 
+def _ensure_quote_output_schema(df: pd.DataFrame) -> pd.DataFrame:
+    required_defaults = {
+        "quote_number": "",
+        "customer_id": "",
+        "customer_name": "",
+        "user_id": "",
+        "quote_date": pd.NaT,
+        "parts_quoted": 0,
+        "total_lines": 0,
+        "quote_amount": 0.0,
+        "matched_orders": "",
+        "converted_net_sales": 0.0,
+        "converted_lines": 0,
+        "line_match_rate": 0.0,
+        "converted": False,
+        "follow_up_needed": True,
+    }
+    out = df.copy()
+    for col, default in required_defaults.items():
+        if col not in out.columns:
+            out[col] = default
+    return out
+
+
+def _ensure_rep_summary_schema(df: pd.DataFrame) -> pd.DataFrame:
+    required_defaults = {
+        "user_id": "",
+        "consolidated_quotes": 0,
+        "converted_quotes": 0,
+        "converted_net_sales": 0.0,
+        "conversion_rate": 0.0,
+    }
+    out = df.copy()
+    for col, default in required_defaults.items():
+        if col not in out.columns:
+            out[col] = default
+    return out
+
+
 def _format_currency(value: Any) -> str:
     if pd.isna(value):
         return ""
@@ -497,8 +536,8 @@ def index():
             quote_totals = load_quote_totals(quote_totals_file) if quote_totals_file and quote_totals_file.filename else pd.DataFrame()
 
             line_results, rep_summary, quote_results = run_conversion(orders, quotes, min_line_match_ratio=0.90)
-
-            line_results, rep_summary, quote_results = run_conversion(orders, quotes, min_line_match_ratio=0.90)
+            quote_results = _ensure_quote_output_schema(quote_results)
+            rep_summary = _ensure_rep_summary_schema(rep_summary)
 
             min_amount_mask = quote_results["quote_amount"].fillna(0) >= min_quote_amount
             follow_up_quotes = quote_results[quote_results["follow_up_needed"] & min_amount_mask].copy()
