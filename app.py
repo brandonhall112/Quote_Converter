@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 import re
 from threading import Timer
+import os
 from typing import Any
 import sys
 import webbrowser
@@ -355,9 +356,24 @@ def index():
             template_bytes = _resolve_template_bytes(template_file)
             orders = load_orders(order_file)
             quotes = load_quotes(quote_file)
+            if orders.empty:
+                raise ValueError(
+                    "No usable order rows were found after parsing. "
+                    "Check Order Date (D), Customer ID (G), and Part Number (O)."
+                )
+            if quotes.empty:
+                raise ValueError(
+                    "No usable quote rows were found after parsing. "
+                    "Check Quote Number (A), Part Number (C), and Date Quoted (AW)."
+                )
 
             line_results, rep_summary, quote_results = run_conversion(orders, quotes)
             follow_up_quotes = quote_results[quote_results["follow_up_needed"]].copy()
+            if follow_up_quotes.empty:
+                raise ValueError(
+                    "Analysis completed, but there are no follow-up quotes to write. "
+                    "All parsed quotes are currently marked as converted."
+                )
             generated_report = build_follow_up_workbook(template_bytes, follow_up_quotes)
 
             quote_results_html = quote_results.sort_values(["quote_date", "quote_number"]).to_html(
@@ -407,5 +423,8 @@ def _open_browser() -> None:
 
 
 if __name__ == "__main__":
-    Timer(1.0, _open_browser).start()
-    app.run(host="127.0.0.1", port=8000, debug=False, use_reloader=False)
+    port = int(os.getenv("PORT", "8000"))
+    should_open_browser = os.getenv("PORT") is None and os.getenv("CI", "").lower() not in {"1", "true", "yes"}
+    if should_open_browser:
+        Timer(1.0, _open_browser).start()
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
