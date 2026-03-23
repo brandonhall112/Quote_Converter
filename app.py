@@ -545,43 +545,23 @@ def index():
             template_bytes = _resolve_template_bytes(template_file)
             orders = load_orders(order_file)
             quotes = load_quotes(quote_file)
-            if orders.empty:
-                raise ValueError(
-                    "No usable order rows were found after parsing. "
-                    "Check Order Date (D), Customer ID (G), and Part Number (O)."
-                )
-            if quotes.empty:
-                raise ValueError(
-                    "No usable quote rows were found after parsing. "
-                    "Check Quote Number (A), Part Number (C), and Date Quoted (AW)."
-                )
 
             line_results, rep_summary, quote_results = run_conversion(orders, quotes)
             follow_up_quotes = quote_results[quote_results["follow_up_needed"]].copy()
-            if follow_up_quotes.empty:
-                raise ValueError(
-                    "Analysis completed, but there are no follow-up quotes to write. "
-                    "All parsed quotes are currently marked as converted."
-                )
             generated_report = build_follow_up_workbook(template_bytes, follow_up_quotes)
-            app.config["last_followup_workbook"] = generated_report
 
-            if submit_action == "download":
-                if follow_up_quotes.empty:
-                    total_quotes = int(len(quote_results))
-                    follow_up_total = int(quote_results["follow_up_needed"].fillna(False).sum())
-                    raise ValueError(
-                        "No follow-up rows qualified for the workbook. "
-                        f"Quotes analyzed: {total_quotes}; follow-up needed: {follow_up_total}; "
-                        f"minimum quote amount filter: ${min_quote_amount:,.0f}. "
-                        "Try lowering the minimum quote amount."
-                    )
-                return send_file(
-                    BytesIO(generated_report),
-                    as_attachment=True,
-                    download_name="Parts_Follow_Up_Output.xlsx",
-                    mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+            quote_results_html = quote_results.sort_values(["quote_date", "quote_number"]).to_html(
+                index=False,
+                classes="results-table",
+            )
+            rep_results_html = rep_summary.sort_values("conversion_rate", ascending=False).to_html(
+                index=False,
+                classes="results-table",
+            )
+
+            app.config["last_quote_results"] = quote_results
+            app.config["last_rep_results"] = rep_summary
+            app.config["last_followup_workbook"] = generated_report
 
             quote_results_display = quote_results.sort_values(["quote_date", "quote_number"]).copy()
             quote_results_display["converted_net_sales"] = quote_results_display["converted_net_sales"].map(_format_currency)
